@@ -4,6 +4,7 @@ import { A, H, effTier, exceptions, itemsFor, nowOf, stepsOf, useApp, userOf } f
 import { AREAS, GROUPS, PLACES, ROLE_LABEL, TEAM_NAME, TRACKS, USERS } from "@/lib/data";
 import type { Item, Report, Role, Team, Tier } from "@/lib/types";
 import { TerritoryMap } from "../hub/TerritoryMap";
+import { BidPage } from "./Bid";
 import { Shell, type NavItem } from "../Shell";
 import { Frame } from "../hub/Frame";
 import { Alerts } from "../reporter/ReporterApp";
@@ -29,7 +30,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
   const [view, setView] = useState(sherpa ? "work" : "rules");
   const [seed, setSeed] = useState<Seed | null>(null);
   const [oppId, setOppId] = useState<string | null>(null);
-  const [offerId, setOfferId] = useState<string | null>(null);
+  const [offerId, setOfferId] = useState<string | null>(null); const [bidId, setBidId] = useState<string | null>(null);
   const [wide, setWide] = useState(false);
   const unread = s.alerts.filter((a) => a.userId === me!.id && !a.read).length;
   const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).length;
@@ -44,7 +45,8 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
   const nav: NavItem[] = [...front, ...(byRole[role] ?? []), N("alerts", "Alerts", "bell", unread)];
 
   const openOpp = (id: string) => { setOppId(id); setView("work"); };
-  const openOffer = (id: string) => { setOfferId(id); setView("offer"); };
+  /** An id that starts with T- is a tender: it opens the bid builder. */
+  const openOffer = (id: string) => { if (id.startsWith("T-")) { setBidId(id); setView("bid"); } else { setOfferId(id); setView("offer"); } };
   const startAsk = (card: NbaItem) => { setSeed({ id: Date.now(), card }); if (!wide) setView("chat"); };
   const ask: Ask = (prompt, c) => startAsk({ key: "ASK:" + Date.now(), no: 0, title: "", why: "", sources: [], urgency: "low", agent: "", cta: "", prompt, kind: "doc", ...c });
   const offer = s.sherpa.offers.find((o) => o.id === offerId);
@@ -62,6 +64,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
         {!w && sherpa && <div className={v === "chat" ? "absolute inset-0" : "hidden"}><ChatHome seed={seed} openOpp={openOpp} openOffer={openOffer} go={goTo} /></div>}
         {v === "work" && <MyWork openId={oppId} setOpenId={setOppId} openOffer={openOffer} onAsk={(o) => ask(`Where is ${o.id} (${o.placeName})?`)} />}
         {v === "map" && <TerritoryMap onOpenOpp={openOpp} onAsk={(p) => ask(p)} />}
+        {v === "bid" && bidId && <BidPage id={bidId} onBack={() => { const op = s.sherpa.tenders.find((x) => x.id === bidId)?.oppId; if (op) setOppId(op); setView("work"); }} openOpp={openOpp} />}
         {v === "offer" && offerId && <OfferPage id={offerId} onBack={() => { if (offer?.oppId) setOppId(offer.oppId); setView("work"); }} />}
         {v === "portfolio" && <Portfolio onAsk={ask} />}
         {v === "campaigns" && <Campaigns onAsk={ask} />}
@@ -77,7 +80,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
       </>
     );
   };
-  const tabView = view === "offer" ? "work" : view;
+  const tabView = view === "offer" || view === "bid" ? "work" : view;
   const setTab = (v: string) => { if (v === "work") setOppId(null); setView(v); };
   if (sherpa) return (
     <Frame framed={framed} agent="SHERPA" tabs={nav} view={wide && tabView === "chat" ? "work" : tabView} setView={setTab} onDemo={onDemo} onWide={setWide} xp={false}

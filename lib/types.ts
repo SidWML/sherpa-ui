@@ -166,10 +166,12 @@ export interface Tender {
   id: string; name: string; accountId: string; area: string; owner: string; line: "ni" | "sc" | "mod";
   stage: "matched" | "qualifying" | "bidding" | "final" | "submitted" | "won" | "lost"; eord: number; value: number; lifts: number;
   summary: string; competitorSpec?: string; lossNote?: string; discovered: number; oppId?: string; checklist: { t: string; done: boolean }[];
+  /** Set when the Sales Manager has created the bid. */
+  bid?: { by: string; at: number; discountPct: number };
 }
 export interface MLead { id: string; name: string; source: string; area: string; createdAt: number; owner?: string; status: "new" | "working" | "converted" | "dropped"; interest: string; score: number }
 export interface Campaign { id: string; name: string; segment: string; area: string; size: number; status: "draft" | "live" | "done"; createdBy: string; createdAt: number; message?: { subject: string; body: string }; leads: number }
-export type TaskKind = "accept" | "findContact" | "research" | "contact" | "visit" | "qualify" | "config" | "compliance" | "approve" | "revise" | "send" | "followup" | "handover" | "assign" | "other";
+export type TaskKind = "accept" | "findContact" | "research" | "contact" | "visit" | "qualify" | "config" | "bid" | "compliance" | "approve" | "revise" | "send" | "followup" | "handover" | "assign" | "other";
 export interface Task { id: string; title: string; detail?: string; by: string; forUser?: string; accountId?: string; oppId?: string; kind?: TaskKind; due: number; done: boolean; createdAt: number; doneAt?: number; result?: string; source: string }
 /** One record from the first sighting to the won deal. Lead, tender and offer are stages of it, not separate lists. */
 export type OppStage = "new" | "contact" | "visit" | "qualify" | "bid" | "offer" | "sent" | "won" | "lost" | "closed";

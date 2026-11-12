@@ -8,7 +8,7 @@ import { baseInput, evaluate, presetToInput, tierOf } from "./engine";
 export const H = 3600000;
 const KEY = "snaplead-poc-v5";
 const USER_KEY = "snaplead-user";
-export const STATE_VERSION = 5;
+export const STATE_VERSION = 6;
 
 export const userOf = (id?: string | null) => USERS.find((u) => u.id === id);
 export const nowOf = (s: State) => Date.now() + s.clock;

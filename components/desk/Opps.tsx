@@ -112,7 +112,7 @@ export function OppPage({ id, onBack, openOffer, embedded }: { id: string; onBac
             <Card className="p-5">
               <Label>Tender and offer</Label>
               <div className="space-y-3">
-                {tender && <div className="rounded-xl border border-line p-3 text-[13.5px]"><div className="flex items-center justify-between gap-2"><b>{tender.id} · {tender.name}</b><Pill tone={tender.stage === "final" ? "green" : "gray"}>{tender.stage === "final" ? "Final bidding" : tender.stage}</Pill></div><div className="mt-1 text-xs text-muted">The customer&apos;s formal request. Bid due in {Math.max(0, daysTo(s, tender.eord))} days. {tender.competitorSpec ? "The spec names a competitor product." : ""}</div><ul className="mt-2 space-y-1 text-[13px]">{tender.checklist.map((c) => <li key={c.t} className="flex gap-2"><span className={c.done ? "text-emerald-600" : "text-muted"}>{c.done ? "✓" : "○"}</span>{c.t}</li>)}</ul></div>}
+                {tender && <div className="rounded-xl border border-line p-3 text-[13.5px]"><div className="flex items-center justify-between gap-2"><b>{tender.id} · {tender.name}</b><Pill tone={tender.stage === "final" ? "green" : "gray"}>{tender.stage === "final" ? "Final bidding" : tender.stage}</Pill></div><div className="mt-1 text-xs text-muted">The customer&apos;s formal call for prices. Bid due in {Math.max(0, daysTo(s, tender.eord))} days. {tender.competitorSpec ? "It names a competitor&apos;s part." : ""}</div><ul className="mt-2 space-y-1 text-[13px]">{tender.checklist.map((c) => <li key={c.t} className="flex gap-2"><span className={c.done ? "text-emerald-600" : "text-muted"}>{c.done ? "✓" : "○"}</span>{c.t}</li>)}</ul><button onClick={() => openOffer(tender.id)} className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-brand px-3 text-[12.5px] font-semibold text-brand hover:bg-brand-soft">{tender.bid ? "Open the bid" : "Open the bid builder"}</button></div>}
                 {offer && <button onClick={() => openOffer(offer.id)} className="flex w-full items-center justify-between gap-3 rounded-xl border border-line p-3 text-left text-[13.5px] hover:bg-surface"><div><b>{offer.id} · {offer.title}</b><div className="text-xs text-muted">{tender ? "Our priced answer to the tender" : "Our offer to the customer"} · {inr(offer.price)} · {offer.discountPct}% off</div></div><span className="flex items-center gap-2"><OfferPill o={offer} /><Icon n="chev" s={14} /></span></button>}
               </div>
             </Card>
@@ -209,7 +209,7 @@ function TaskPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: strin
   );
 
   if (t.kind === "qualify") return (
-    <Panel title="Qualify: tender or direct quote?" why="Is the customer asking several firms for prices through a formal tender with an end date, or can you offer directly? This decides what happens next." does="Creates the tender and an offer (formal), or an offer (direct). Or closes it if it is not a fit." then="Formal: Sales support completes the configuration and you fill the compliance sheet. Direct: you price it and send it for approval.">
+    <Panel title="Qualify: tender or direct quote?" why="Is the customer asking several companies for a price in a formal tender, with a last date? Or can you simply send a quote to one customer? This decides what happens next." does="Formal tender: starts a bid. Direct quote: starts a quote. Or closes it if it is not a fit." then="Formal tender: Sales Support fills the lift details and the Sales Manager creates the bid. You send it to the customer. Direct quote: you price it and send it.">
       <div className="flex flex-wrap items-center gap-2">
         <select value={f.days} onChange={(e) => set("days")(e.target.value)} className="min-h-11 rounded-xl border border-line bg-white px-3 text-sm">{["14", "30", "45", "60"].map((d) => <option key={d} value={d}>Bid due in {d} days</option>)}</select>
         <Btn onClick={() => mutate((st) => OP.qualify(st, o.id, by, "tender", Number(f.days)))}>Formal tender</Btn>
@@ -226,6 +226,11 @@ function TaskPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: strin
         {offer && <Btn onClick={() => mutate((st) => SH.apply(st, by, { t: "offerFix", id: offer.id }))}>Complete the configuration</Btn>}</div>
     </Panel>
   );
+
+  if (t.kind === "bid") { const tn = tenderOf(s, o.tenderId); return (
+    <Panel title={t.title} why={`${t.detail ?? ""} The tender, lift details, earlier prices and every bid paper are in one place.`} does="Opens the bid builder." then={`When you create the bid, ${NAMES[o.owner]} sends it to the customer.`}>
+      {tn && <Btn onClick={() => openOffer(tn.id)}>Open the bid builder</Btn>}
+    </Panel>); }
 
   if (t.kind === "compliance") return (
     <Panel title={t.title} why="The tender needs a signed technical compliance sheet with the bid." does="Ticks the compliance item on the tender checklist." then="The bid moves on to pricing and approval.">

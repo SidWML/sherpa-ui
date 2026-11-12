@@ -150,7 +150,7 @@ function ReportRow({ r, onOpen, active }: { r: Report; onOpen: () => void; activ
 
 const OPP_SUB: Record<string, string> = { winback: "Competitor servicing", fault: "Service call", records: "Records check", project: "Building site", sales: "Sales lead", renewal: "Contract ending", modernisation: "Ageing unit" };
 const TIER_ORDER: Record<string, number> = { Hot: 0, Warm: 1, Cold: 2, Info: 3 };
-function pageList(cur: number, pages: number): (number | "…")[] {
+export function pageList(cur: number, pages: number): (number | "…")[] {
   if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
   const set = new Set([1, 2, cur - 1, cur, cur + 1, pages - 1, pages].filter((p) => p >= 1 && p <= pages));
   const arr = Array.from(set).sort((x, y) => x - y); const out: (number | "…")[] = [];

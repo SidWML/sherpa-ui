@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
 import { buildPins, OTHER_CLIENTS, LAYER_LABEL, type Layer, type Pin } from "@/lib/geo";
-import { AREA_NAME, OP } from "@/lib/sherpa";
+import { AREA_NAME, OP, NAMES, addTask } from "@/lib/sherpa";
+import { USERS } from "@/lib/data";
 import { Icon } from "../ui";
 import { involvedOpps } from "./parts";
 import { T } from "../reporter/ReporterApp";
@@ -118,7 +119,14 @@ export function TerritoryMap({ onOpenOpp, onAsk, onGoWork }: { onOpenOpp: (id: s
   const zoomBtn = (d: number) => zoomAt(view.z + d, size.w / 2, size.h / 2);
   const addLead = (p: Pin) => {
     const c = OTHER_CLIENTS.find((x) => x.id === p.id); if (!c) return; let id = "";
-    mutate((st) => { const o = OP.create(st, { title: `Existing installation: ${c.name}`, kind: "existing", placeName: c.name, area: c.area, owner: me!.id, source: { type: "nba", itemId: c.id, label: "Added from the territory map" }, geo: { lat: c.lat, lng: c.lng } }); OP.accepted(st, o.id, me!.id); id = o.id; });
+    /* A building with lifts already in it is an existing-installation lead. New-installation reps do not sell that, so it goes to the EI rep for the area. */
+    const owner = me!.role === "ni" ? (USERS.find((u) => u.role === "ei" && u.areas?.includes(c.area))?.id ?? me!.id) : me!.id;
+    mutate((st) => {
+      const o = OP.create(st, { title: `Existing installation: ${c.name}`, kind: "existing", placeName: c.name, area: c.area, owner, source: { type: "nba", itemId: c.id, label: "Added from the territory map", reporter: me!.id }, geo: { lat: c.lat, lng: c.lng } });
+      if (owner === me!.id) OP.accepted(st, o.id, me!.id);
+      else addTask(st, { oppId: o.id, forUser: owner, by: me!.id, title: `Accept: ${o.title}`, detail: `${NAMES[me!.id] ?? me!.id} spotted this on the map. Lifts served by another maker.`, days: 3, kind: "accept", source: "Territory map" });
+      id = o.id;
+    });
     if (id) setSel(id);
   };
 
@@ -202,6 +210,7 @@ export function TerritoryMap({ onOpenOpp, onAsk, onGoWork }: { onOpenOpp: (id: s
 
 /* ------------------------------------------------------------------ one place: what it is, why it matters, what to do */
 function Detail({ p, onBack, onOpenOpp, onAsk, onAdd, onGoWork }: { p: Pin; onBack: () => void; onOpenOpp: (id: string) => void; onAsk: (prompt: string) => void; onAdd: () => void; onGoWork?: () => void }) {
+  const { me } = useApp();
   const L = LAYER[p.layer];
   const dir = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
   const btn = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border px-3.5 text-[13.5px] font-semibold";
@@ -223,7 +232,7 @@ function Detail({ p, onBack, onOpenOpp, onAsk, onAdd, onGoWork }: { p: Pin; onBa
       <div className="shrink-0 space-y-2 border-t border-line bg-white p-3">
         {p.layer === "lead" && p.oppId && <button onClick={() => { onGoWork?.(); onOpenOpp(p.oppId!); }} className={`${btn} w-full border-brand bg-brand text-white hover:opacity-90`}>Open opportunity</button>}
         {p.layer === "ours" && <button onClick={() => onAsk(`Brief me before my visit to ${p.name}`)} className={`${btn} w-full border-brand bg-brand text-white hover:opacity-90`}><Icon n="sparkle" s={15} /> Brief me before the visit</button>}
-        {p.layer === "other" && <button onClick={onAdd} className={`${btn} w-full border-brand bg-brand text-white hover:opacity-90`}><Icon n="plus" s={15} /> Add as a lead</button>}
+        {p.layer === "other" && <button onClick={onAdd} className={`${btn} w-full border-brand bg-brand text-white hover:opacity-90`}><Icon n="plus" s={15} /> {me?.role === "ni" ? "Pass to the EI rep" : "Add as a lead"}</button>}
         <div className="grid grid-cols-2 gap-2">
           {p.layer === "lead" && p.oppId ? <button onClick={() => onAsk(`Where is ${p.oppId} (${p.name})?`)} className={`${btn} border-line bg-white hover:bg-surface`}><Icon n="sparkle" s={15} /> Ask SHERPA</button>
             : p.layer === "ours" ? <button onClick={() => onAsk(`Draft a renewal offer for ${p.name}`)} className={`${btn} border-line bg-white hover:bg-surface`}><Icon n="sparkle" s={15} /> Plan a renewal</button>

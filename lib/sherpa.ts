@@ -26,7 +26,19 @@ export const listPrice = (area: string, product: ProductKey, term: number) => Ma
 /** Up to 10% the seller sends alone. Up to 20% the sales manager approves. Above 20% is outside this app: it needs the regional lead in writing. */
 export const approversFor = (pct: number): string[] => (pct <= GUIDE.seller ? [] : pct <= GUIDE.manager ? ["marc"] : []);
 export const aboveLimit = (pct: number) => pct > GUIDE.manager;
-const MANAGER = "marc"; const SUPPORT = "shalini";
+export const MANAGER = "marc"; export const SUPPORT = "shalini";
+/** The papers a tender bid usually needs. The Sales Manager builds the bid from these. */
+export const BID_PAPERS = [
+  { key: "emd", title: "Bid security (EMD)", help: "Money or a bank guarantee that shows we are serious. Usually 2% of the bid price.", auto: false },
+  { key: "company", title: "Company papers", help: "Registration, GST and PAN. Taken from the company file.", auto: true },
+  { key: "past", title: "Similar past projects", help: "A list of lifts we installed for other customers.", auto: true },
+  { key: "turnover", title: "Turnover statement", help: "Yearly sales for the last 3 years.", auto: true },
+  { key: "compliance", title: "Technical compliance sheet", help: "Line by line: what the tender asks and what our lift gives.", auto: true },
+  { key: "price", title: "Price sheet", help: "The price of every lift, in the tender's format.", auto: true },
+  { key: "datasheets", title: "Lift datasheets and drawings", help: "Technical pages for the lift model we offer.", auto: true },
+  { key: "declarations", title: "Signed declarations and authority letter", help: "Signed statements the tender asks for. The manager signs them.", auto: false },
+] as const;
+const PAPER_LIST = () => BID_PAPERS.map((p) => ({ t: p.title, done: false }));
 export const perYear = (o: Pick<Offer, "price" | "term" | "product">) => (PRODUCT[o.product].yearly ? o.price / o.term : o.price);
 export const NAMES: Record<string, string> = { ...Object.fromEntries(USERS.map((u) => [u.id, u.name])), projectfinder: "Project Lead Finder" };
 
@@ -96,7 +108,7 @@ export function seedSherpa(): Sherpa {
     ast("a50111", "secbiz", "secbiz", "Lift 50111 · Secunderabad Business Hub", "Schindler 3300", 24, { owner: "elias", contractEnd: now + 420 * DAY, contractValue: 126000, health: 72 }),
   ];
   const tender = (id: string, name: string, accountId: string, area: string, owner: string, line: Tender["line"], stage: Tender["stage"], eordDays: number, lifts: number, summary: string, o: Partial<Tender> = {}): Tender =>
-    ({ id, name, accountId, area, owner, line, stage, eord: now + eordDays * DAY, value: lifts * PRODUCT.newinstall.list, lifts, summary, discovered: now - 12 * DAY, checklist: [{ t: "Bid bond and EMD arranged", done: true }, { t: "Technical compliance sheet filled", done: false }, { t: "Price approved by the manager", done: false }, { t: "Pre-bid clarifications sent", done: true }], ...o });
+    ({ id, name, accountId, area, owner, line, stage, eord: now + eordDays * DAY, value: lifts * PRODUCT.newinstall.list, lifts, summary, discovered: now - 12 * DAY, checklist: PAPER_LIST(), ...o });
   const tenders: Tender[] = [
     tender("T-101", "Kokapet Skyline Towers A to C: 14 lifts", "kokapet", "HYC", "noah", "ni", "bidding", 9, 14, "Three residential towers, G+32, 14 passenger lifts at 2.0 m/s. Bid due in 9 days. Developer wants delivery in 11 months.", { lossNote: "Lost the 2025 Madhapur tower bid on price: OtherLift was 14% lower with a longer lead time." }),
     tender("T-102", "Gachibowli Phase 3 Commercial Tower: 8 lifts", "deccan", "HYW", "noah", "ni", "matched", 55, 8, "New commercial tower matched from a building permit. G+24, 8 lifts plus 2 service lifts. Existing key customer.", { discovered: now - 2 * DAY }),
@@ -137,7 +149,7 @@ export const oppOfOffer = (s: State, o: Offer) => s.sherpa.opps.find((x) => x.id
 export const tasksOfOpp = (s: State, oppId: string, open = true) => s.sherpa.tasks.filter((t) => t.oppId === oppId && (!open || !t.done));
 export const isOpen = (o: Opp) => !["won", "lost", "closed"].includes(o.stage);
 
-function addTask(s: State, t: { oppId?: string; forUser: string; by: string; title: string; detail?: string; days: number; kind: TaskKind; source?: string; accountId?: string }): Task {
+export function addTask(s: State, t: { oppId?: string; forUser: string; by: string; title: string; detail?: string; days: number; kind: TaskKind; source?: string; accountId?: string }): Task {
   const task: Task = { id: `TK-${s.sherpa.seq++}`, oppId: t.oppId, title: t.title, detail: t.detail, by: t.by, forUser: t.forUser, accountId: t.accountId, kind: t.kind, due: nowS(s) + t.days * DAY, done: false, createdAt: nowS(s), source: t.source ?? "workflow" };
   s.sherpa.tasks.unshift(task);
   if (t.forUser !== t.by) ping(s, t.forUser, `${NAMES[t.by] ?? t.by} needs you: ${t.title}`);
@@ -231,10 +243,10 @@ export const OP = {
     const offer = SH.makeOffer(s, { accountId: accId, area: o.area, product, term: product === "maintenance" || product === "renewal" ? 3 : 1, discountPct: 0, by: o.owner, oppId: o.id, source: o.source.itemId ? { reportId: o.source.reportId!, itemId: o.source.itemId } : undefined });
     o.offerId = offer.id;
     if (choice === "tender") {
-      const t: Tender = { id: `T-${s.sherpa.seq++}`, name: `${o.title}: ${o.placeName}`, accountId: accId, area: o.area, owner: o.owner, line: "ni", stage: "bidding", eord: nowS(s) + eordDays * DAY, value: o.value ?? PRODUCT[product].list, lifts: 1, summary: `Tender raised from ${o.source.label}.`, discovered: nowS(s), oppId: o.id, checklist: [{ t: "Bid bond and EMD arranged", done: false }, { t: "Technical compliance sheet filled", done: false }, { t: "Price approved by the manager", done: false }, { t: "Pre-bid clarifications sent", done: false }] };
+      const t: Tender = { id: `T-${s.sherpa.seq++}`, name: `${o.title}: ${o.placeName}`, accountId: accId, area: o.area, owner: o.owner, line: "ni", stage: "bidding", eord: nowS(s) + eordDays * DAY, value: o.value ?? PRODUCT[product].list, lifts: 1, summary: `Tender raised from ${o.source.label}.`, discovered: nowS(s), oppId: o.id, checklist: PAPER_LIST() };
       s.sherpa.tenders.unshift(t); o.tenderId = t.id; o.stage = "bid"; olog(s, o, by, `Formal tender ${t.id} raised. Bid due in ${eordDays} days`);
       if (product === "newinstall") { offer.missing = ["Rated load (kg)", "Number of floors", "Door type"]; addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Complete the configuration for ${offer.id}`, detail: `${o.title}. Missing: rated load, floors, door type.`, days: 2, kind: "config", source: "N21" }); olog(s, o, by, "Asked Sales support to complete the configuration"); }
-      addTask(s, { oppId: id, forUser: o.owner, by, title: `Fill the compliance sheet for ${t.id}`, days: Math.max(2, eordDays - 5), kind: "compliance", source: "N13" });
+      addTask(s, { oppId: id, forUser: MANAGER, by, title: `Create the bid for ${t.id}`, detail: `Bid due in ${eordDays} days. Sales Support completes the lift details, then you build the bid.`, days: Math.max(2, eordDays - 5), kind: "bid", source: "N13" });
     } else { o.stage = "offer"; olog(s, o, by, `Direct offer ${offer.id} drafted`); addTask(s, { oppId: id, forUser: o.owner, by, title: `Price and send ${offer.id}`, days: 3, kind: "revise" }); }
   },
   /** Offer events keep the opportunity and everyone's tasks in step. */
@@ -263,6 +275,32 @@ export const OP = {
   completeTask(s: State, taskId: string, by: string, result = "") {
     const t = s.sherpa.tasks.find((x) => x.id === taskId); if (!t) return;
     t.done = true; t.doneAt = nowS(s); t.result = result; const o = oppOf(s, t.oppId); if (o) olog(s, o, by, `${t.title}${result ? `: ${result}` : ""}`);
+  },
+  /** One paper of the bid is ready, or not. */
+  setPaper(s: State, tenderId: string, i: number, done: boolean) {
+    const t = tenderOf(s, tenderId); if (t?.checklist[i]) t.checklist[i].done = done;
+  },
+  /** Fill every paper SHERPA can make by itself. */
+  fillPapers(s: State, tenderId: string, by: string) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t) return;
+    BID_PAPERS.forEach((p, i) => { if (p.auto && t.checklist[i]) t.checklist[i].done = true; });
+    if (o) olog(s, o, by, "SHERPA filled the bid papers it can make");
+  },
+  /** The Sales Manager finished the bid. The owner sends it to the customer. */
+  bidDone(s: State, tenderId: string, by: string, discountPct: number) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t || !o) return;
+    const product: ProductKey = t.line === "ni" ? "newinstall" : t.line === "sc" ? "maintenance" : "modernisation";
+    const offer = offerOf(s, o.offerId) ?? SH.makeOffer(s, { accountId: t.accountId, area: t.area, product, term: t.line === "sc" ? 3 : 1, discountPct: 0, by: o.owner, oppId: o.id });
+    if (offer.missing?.length) return;
+    offer.listPrice = t.value; offer.discountPct = discountPct; offer.price = Math.round(t.value * (1 - discountPct / 100));
+    offer.status = "approved"; offer.approvals = [{ by, status: "approved", at: nowS(s) }]; offer.email = undefined; offer.lastActivity = nowS(s);
+    offer.log.push({ t: nowS(s), by: NAMES[by] ?? by, text: `Bid created: ${discountPct}% off, ${inr(offer.price)}` });
+    t.checklist.forEach((c) => { c.done = true; }); t.stage = "final"; t.bid = { by, at: nowS(s), discountPct };
+    closeTasks(s, o.id, ["bid", "compliance", "approve", "revise", "config"]);
+    o.offerId = offer.id; offer.oppId = o.id; o.value = offer.price; o.stage = "offer";
+    const acc = accountOf(s, t.accountId)?.name ?? o.placeName;
+    olog(s, o, by, `Bid for ${t.id} created: ${discountPct}% off, ${inr(offer.price)}`);
+    addTask(s, { oppId: o.id, forUser: o.owner, by, title: `Send the bid to ${acc}`, detail: `${NAMES[by]} created the bid. Check the email and send it to the customer.`, days: 2, kind: "send", source: "Bid" });
   },
   tickCompliance(s: State, id: string, by: string) {
     const o = oppOf(s, id); if (!o) return; const t = tenderOf(s, o.tenderId);
@@ -305,7 +343,7 @@ function seedOpps(sh: Sherpa, now: number) {
     const o = mk(t.name, t.line === "ni" ? "newbuild" : t.line === "sc" ? "renewal" : "modernisation", t.accountId, acc(t.accountId).name, t.area, t.owner, t.stage === "matched" ? "qualify" : "bid", `tender ${t.id}`, 12);
     t.oppId = o.id; o.tenderId = t.id; o.value = t.value; o.contact = { name: acc(t.accountId).contact.name, role: acc(t.accountId).contact.role, email: acc(t.accountId).contact.email, via: "the account record" }; o.visited = t.stage !== "matched";
     if (t.stage === "matched") task(o, t.owner, "projectfinder", `Qualify ${t.id}: tender or direct quote?`, "qualify", 2, 20, t.summary);
-    else task(o, t.owner, "projectfinder", `Fill the compliance sheet for ${t.id}`, "compliance", 3, 30);
+    else task(o, MANAGER, "projectfinder", `Create the bid for ${t.id}`, "bid", Math.max(2, Math.round((t.eord - now) / DAY) - 5), 30, `Bid due ${Math.round((t.eord - now) / DAY)} days from now. Lift details and past prices are ready in the bid builder.`);
   });
   sh.offers.forEach((of) => {
     const t = sh.tenders.find((x) => x.accountId === of.accountId && of.product === "newinstall");
@@ -466,6 +504,22 @@ export function emailFor(s: State, o: Offer, seller: string): { subject: string;
   const a = accountOf(s, o.accountId); const asset = assetOf(s, o.assetId);
   const first = a?.contact.name.split(" ")[0] ?? "there";
   const what = asset ? asset.label.split(" · ")[0] + (asset.label.split(" · ")[1] ? ` at ${asset.label.split(" · ")[1]}` : "") : (a?.name ?? "your building");
+  const tn = s.sherpa.tenders.find((t) => t.oppId === o.oppId && t.bid);
+  if (tn) {
+    const body = `Dear ${first} garu,
+
+Please find our bid for ${tn.name}.
+
+- Lifts: ${tn.lifts}
+- Bid price: ${inr(o.price)}${o.discountPct ? `, including ${o.discountPct}% off the list price` : ""}. GST extra as applicable.
+- Papers attached: ${BID_PAPERS.map((p) => p.title.toLowerCase()).join(", ")}.
+
+Please tell me if you need anything else before the last date. I will call you to check that you received it.
+
+Best regards,
+${seller}`;
+    return { subject: `Our bid for ${tn.name}`, body };
+  }
   const yearly = PRODUCT[o.product].yearly;
   const price = yearly ? `${inr(o.price / o.term)} per year (${inr(o.price)} over ${o.term} year${o.term > 1 ? "s" : ""})` : inr(o.price);
   const body = `Dear ${first} garu,\n\nThank you for your time. Following our conversation about ${what}, here is our proposal: ${o.title.toLowerCase()}${yearly ? `, ${o.term} year${o.term > 1 ? "s" : ""}` : ""}.\n\nPrice: ${price}${o.discountPct ? `, including ${o.discountPct}% off the list price` : ""}. GST extra as applicable.\n\nI will call you in two weeks to answer any questions. If it helps, I can come by and walk through it on site.\n\nBest regards,\n${seller}`;
