@@ -1,50 +1,75 @@
 "use client";
+import Link from "next/link";
 import { useApp } from "@/lib/store";
-import { USERS, ROLE_LABEL } from "@/lib/data";
-import { Btn, Icon } from "./ui";
+import { APPS, ROLE_LABEL } from "@/lib/data";
+import type { Role, User } from "@/lib/types";
+import { Avatar, Btn, Icon } from "./ui";
 
-export function DemoPanel({ onClose, onAtlas }: { onClose: () => void; onAtlas: () => void }) {
-  const { s, mutate, advance, setOffline, reset, login, me } = useApp();
-  const clockH = Math.round(s.clock / 3600000);
+const SHERPA_GROUPS: [string, Role[]][] = [
+  ["Sales reps", ["ni", "ei", "sc", "mod"]],
+  ["Management and support", ["mgr", "am", "ss", "mkt"]],
+  ["Product", ["admin"]],
+];
+
+function RoleRow({ u, current, onPick }: { u: User; current: boolean; onPick: () => void }) {
+  return (
+    <button onClick={onPick} aria-current={current} className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition ${current ? "bg-brand-soft" : "hover:bg-surface"}`}>
+      <Avatar initials={u.initials} tone={current ? "brand" : "ink"} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13.5px] font-semibold">{u.name}</span>
+        <span className="block truncate t-small">{u.title}</span>
+      </span>
+      {current ? <span className="text-brand"><Icon n="check" s={16} /></span> : <span className="text-muted"><Icon n="chev" s={14} /></span>}
+    </button>
+  );
+}
+
+function AppLink({ href, icon, title, sub }: { href: string; icon: string; title: string; sub: string }) {
+  return (
+    <Link href={href} className="flex items-center gap-3 rounded-lg border border-line px-3 py-3 transition hover:bg-surface">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand text-white"><Icon n={icon} s={17} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13.5px] font-semibold">{title}</span>
+        <span className="block t-small">{sub}</span>
+      </span>
+      <span className="text-muted"><Icon n="chev" s={14} /></span>
+    </Link>
+  );
+}
+
+export function DemoPanel({ onClose, onAtlas }: { onClose: () => void; onAtlas?: () => void }) {
+  const { app, reset, login, me } = useApp();
+  const snap = app === "snap";
+  const users = APPS[app].users;
+  const groups: [string, User[]][] = snap
+    ? [[ROLE_LABEL.reporter, users]]
+    : SHERPA_GROUPS.map(([label, roles]) => [label, users.filter((u) => roles.includes(u.role))]);
+  const pick = (id: string) => { login(id); onClose(); };
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="pop h-full w-full max-w-sm overflow-y-auto bg-white p-5 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between">
-          <div><div className="text-base font-semibold">Demo controls</div><div className="text-xs text-muted">Prototype helpers. Not part of the product.</div></div>
-          <button onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-xl border border-line"><Icon n="x" s={16} /></button>
+      <div onClick={(e) => e.stopPropagation()} className="pop flex h-full w-full max-w-sm flex-col bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-4">
+          <div><div className="text-base font-semibold">Switch role</div><div className="t-small">Prototype helper. Not part of the product.</div></div>
+          <button onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={16} /></button>
         </div>
 
-        <div className="mb-5 rounded-2xl bg-surface p-4">
-          <div className="mb-1 text-sm font-semibold">Follow-up clock</div>
-          <p className="mb-3 text-xs text-muted">Hot leads: owner reminded at 24 h, manager told at 48 h, manager reassigns at 72 h. Jump time to see it fire. Simulated time is now <b>+{clockH} h</b>.</p>
-          <div className="flex flex-wrap gap-2">
-            {[24, 48, 72, 120].map((h) => <Btn key={h} sm v="ghost" onClick={() => advance(h)}>+{h}h</Btn>)}
-          </div>
+        <div className="scroll-thin min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-4">
+          {groups.filter(([, list]) => list.length).map(([label, list]) => (
+            <section key={label}>
+              <h2 className="t-label mb-1 px-2.5">{label}</h2>
+              <div className="space-y-0.5">{list.map((u) => <RoleRow key={u.id} u={u} current={me?.id === u.id} onPick={() => pick(u.id)} />)}</div>
+            </section>
+          ))}
+          <section className="px-0.5">
+            <h2 className="t-label mb-1.5 px-2">{snap ? "Sales app" : "Lead generation"}</h2>
+            {snap
+              ? <AppLink href="/" icon="sparkle" title="Open SHERPA" sub="Sellers, managers and admin" />
+              : <AppLink href="/snap" icon="camera" title="Open Snap & Lead" sub="Spot a lift and create a lead" />}
+          </section>
         </div>
 
-        <div className="mb-5 space-y-2 rounded-2xl bg-surface p-4">
-          <div className="text-sm font-semibold">Conditions</div>
-          <label className="flex items-center justify-between gap-3 text-sm"><span>Phone offline (no signal)<span className="block text-xs text-muted">Reports queue, then sync when back online</span></span>
-            <input type="checkbox" className="h-5 w-5 accent-[#e3001b]" checked={s.offline} onChange={(e) => setOffline(e.target.checked)} /></label>
-          <label className="flex items-center justify-between gap-3 text-sm"><span>Photo reader is down<span className="block text-xs text-muted">Employee gets manual entry</span></span>
-            <input type="checkbox" className="h-5 w-5 accent-[#e3001b]" checked={!!s.readerDown} onChange={(e) => mutate((st) => { st.readerDown = e.target.checked; })} /></label>
-          <label className="flex items-center justify-between gap-3 text-sm"><span>Pause routing<span className="block text-xs text-muted">Admin kill switch: all leads go to the manager list</span></span>
-            <input type="checkbox" className="h-5 w-5 accent-[#e3001b]" checked={s.cfg.paused} onChange={(e) => mutate((st) => { st.cfg.paused = e.target.checked; st.audit.unshift({ t: Date.now() + st.clock, by: "Demo", text: `Routing ${e.target.checked ? "paused" : "resumed"}` }); })} /></label>
-        </div>
-
-        <div className="mb-5">
-          <div className="mb-2 text-sm font-semibold">Jump to a role</div>
-          <div className="grid grid-cols-2 gap-2">
-            {USERS.map((u) => (
-              <button key={u.id} onClick={() => { login(u.id); onClose(); }} className={`rounded-xl border px-3 py-2 text-left text-xs ${me?.id === u.id ? "border-brand bg-brand-soft" : "border-line bg-white hover:bg-surface"}`}>
-                <div className="font-semibold">{u.name}</div><div className="text-muted">{ROLE_LABEL[u.role]}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Btn v="soft" full onClick={() => { onAtlas(); onClose(); }}>Open the case atlas (145 cases)</Btn>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-line p-4">
+          {onAtlas && <Btn v="soft" full onClick={() => { onAtlas(); onClose(); }}>Open the case atlas (145 cases)</Btn>}
           <Btn v="ghost" full onClick={() => { if (confirm("Reset all demo data to the starting set?")) { reset(); onClose(); } }}>Reset demo data</Btn>
         </div>
       </div>

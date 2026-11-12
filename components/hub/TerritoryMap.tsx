@@ -5,7 +5,7 @@ import { buildPins, OTHER_CLIENTS, LAYER_LABEL, type Layer, type Pin } from "@/l
 import { AREA_NAME, OP } from "@/lib/sherpa";
 import { Icon } from "../ui";
 import { involvedOpps } from "./parts";
-import { T } from "../reporter/ReporterApp";
+import { T } from "../shared";
 
 /* ------------------------------------------------------------------ web-mercator maths (no map library needed) */
 const TS = 256;

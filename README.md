@@ -10,11 +10,17 @@ npm run dev        # http://localhost:3000
 
 ## How to explore
 
-1. Sign in as **Alex Reyes** (reporter) and tap *Start a new report*.
-2. On the photos step, pick a **Demo scenario** (for example `B5` contract ended, `D1` building site, `A2` unsafe). It loads sample photos and tells you which answers to give.
-3. Create the report, then use **Demo controls** (top right) or the avatar menu to switch to the owner, manager, records, emergency or service role and act on it. The reporter's progress track and points update.
-4. **Demo controls** also jump the follow-up clock (+24h / +48h / +72h), go offline, take the photo reader down, or pause routing.
-5. **Case atlas** lists all 145 PRD cases. About 80 have a runnable scenario.
+There are two separate apps. They share data, but no screen or flow appears in both.
+
+| URL | App | Opens as |
+| --- | --- | --- |
+| `/` | **SHERPA**, for sellers, managers and admin | Madhav Reddy, Sales manager |
+| `/snap` | **Snap & Lead**, the lead generator app | Arjun Rao, lead generator |
+
+1. Open `/snap` and tap *Take or upload photos*, or use **Demo → case atlas** to run one of the PRD scenarios.
+2. Create the report. It is routed to the right owner, and the opportunity appears in SHERPA at `/`.
+3. In SHERPA, use **Switch role** (bottom left, or the avatar menu) to work the lead as another role. The same panel opens Snap & Lead, and Snap & Lead's opens SHERPA. The reporter's progress and points update in Snap & Lead.
+4. Pause routing is in the Admin view.
 
 ## Roles (all 12)
 
@@ -27,12 +33,13 @@ Reporter, SC / EI / MOD / NI sales, account manager, sales manager, records stew
 | `lib/engine.ts` | Business rules: situation, score and reasons, tier, teams, tracks, points. No AI decides tier, owner or safety. |
 | `lib/store.tsx` | State, routing by team and area, follow-up clock, every desk action, seed data, offline queue. |
 | `lib/data.ts` | Users, areas, places, progress tracks, default config, the 145-case catalogue and scenario presets. |
-| `components/reporter/` | Reporter home, Snap flow, My reports, report detail, alerts, rewards. |
+| `app/(sherpa)/`, `app/(snap)/snap/` | The two apps, each with its own root layout. |
+| `components/reporter/` | Snap & Lead: Snap flow, My leads, report detail, rewards. |
 | `components/desk/` | Sales, account, manager, records, emergency, service, leadership, admin desks. |
 
 ## Not built (stubs or out of scope)
 
-Real photo reading, maps, Salesforce / SAP, push notifications, SSO, languages, face blur, batch mode, escalator-owner rules beyond the PRD placeholders.
+Real photo reading, Salesforce / SAP, push notifications, SSO, languages, face blur, batch mode, escalator-owner rules beyond the PRD placeholders.
 All numbers are the PRD's Proposed values and are editable in the Administrator view.
 
 ## Mock server and saved data

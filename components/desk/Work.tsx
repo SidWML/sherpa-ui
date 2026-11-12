@@ -32,8 +32,8 @@ export function Portfolio({ onAsk }: { onAsk: Ask }) {
         {units.map((a) => {
           const acc = accountOf(s, a.accountId);
           return (
-            <Card key={a.id} className="flex flex-wrap items-center gap-4 p-4">
-              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><Pill tone={healthTone(a.health)}>Health {a.health}</Pill>{acc?.key && <Pill tone="amber">Key account</Pill>}{a.handedOver && <Pill tone="blue">New unit</Pill>}</div>
+            <Card key={a.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
+              <div className="min-w-0 flex-1 basis-[16rem]"><div className="flex flex-wrap items-center gap-1.5"><Pill tone={healthTone(a.health)}>Health {a.health}</Pill>{acc?.key && <Pill tone="amber">Key account</Pill>}{a.handedOver && <Pill tone="blue">New unit</Pill>}</div>
                 <div className="mt-1.5 text-[15px] font-semibold">{acc?.name}</div><div className="text-[12.5px] text-muted">{a.label} · {a.ageYears ? `${a.ageYears} yrs` : "new"} · {a.contractEnd ? `contract ends in ${daysTo(s, a.contractEnd)} days` : "no contract"} · {a.callbacks90d} callbacks in 90 days</div></div>
               <div className="flex gap-2"><Btn sm v="ghost" onClick={() => onAsk(`Brief me on lift ${a.id.slice(1)}`, { assetId: a.id, accountId: a.accountId })}>Brief me</Btn><Btn sm onClick={() => onAsk(a.contractEnd ? `Draft the renewal for lift ${a.id.slice(1)}` : `Draft a maintenance offer for lift ${a.id.slice(1)}`, { assetId: a.id, accountId: a.accountId })}>{a.contractEnd ? "Draft renewal" : "Offer maintenance"}</Btn></div>
             </Card>

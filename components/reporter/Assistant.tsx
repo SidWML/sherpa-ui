@@ -1,4 +1,6 @@
 "use client";
+import { StreamText, Thinking, streamMs, thinkMs } from "../Stream";
+import { getThread, saveThread } from "@/lib/chats";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { AREAS, GROUPS, PLACES, PRESETS, TEAM_NAME, TRACKS } from "@/lib/data";
 import { evaluate, presetToInput, teamsOf } from "@/lib/engine";
@@ -8,7 +10,7 @@ import { readPhotos, type Reading } from "@/lib/reader";
 import { levelOf } from "../Shell";
 import { Card, Icon, PhotoTile, Pill, Track } from "../ui";
 import { reportStatus } from "./status";
-import { SnapHero } from "../hub/parts";
+import { SnapHero } from "./SnapHero";
 
 /* ------------------------------------------------------------------ types */
 interface Sel { id: string; name: string; area: string; type: Place["type"]; key?: string; isNew?: boolean }
@@ -25,7 +27,9 @@ type Part =
   | { k: "needs"; id: string; retake: boolean }
   | { k: "stage" }
   | { k: "hero" };
-type Msg = Part & { mid: number };
+type Msg = Part & { mid: number; old?: boolean };
+const LIVE_ONLY = new Set(["stage", "hero", "form"]);
+const slim = (p: Photo) => (p.url && p.url.length > 60000 ? { ...p, url: undefined } : p);
 
 const EQ: Record<Equip, string> = { lift: "Lift / elevator", escalator: "Escalator", walk: "Moving walk" };
 const word = (e: Equip) => (e === "lift" ? "lift" : e === "escalator" ? "escalator" : "moving walk");
@@ -167,12 +171,13 @@ const fresh = () => ({
   ov: {} as Partial<Input>, sample: "", rd: null as Reading | null, corrections: [] as string[], extras: {} as { contact?: string; note?: string }, hints: {} as Hints, typed: { name: "", addr: "" },
 });
 
-export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: Preset | null; onOpen: (id: string) => void; onNew: () => void; onBack?: () => void; direct?: boolean }) {
+export function Assistant({ preset, onOpen, onNew, restore }: { preset?: Preset | null; onOpen: (id: string) => void; onNew: () => void; restore?: string }) {
   const { s, me, mutate, setOffline } = useApp();
   const ctx = useRef({ s, me, mutate, setOffline, onOpen });
   useEffect(() => { ctx.current = { s, me, mutate, setOffline, onOpen }; });
   const D = useRef(fresh());
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [tid] = useState(() => restore ?? `home-${Date.now()}`);
+  const [msgs, setMsgs] = useState<Msg[]>(() => (restore && me ? ((getThread(me.id, restore)?.msgs ?? []) as Msg[]).map((m, k) => ({ ...m, mid: k + 1, old: true })) : []));
   const [chips, setChips] = useState<Chip[]>([]);
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -182,7 +187,7 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   const [sheet, setSheet] = useState(false);
   const [staged, setStaged] = useState<Photo[]>([]);
   const stagedRef = useRef<Photo[]>([]); const hasStage = useRef(false); const formKeys = useRef<string[]>([]);
-  const idc = useRef(0);
+  const idc = useRef(msgs.length);
   const alive = useRef(true);
   const started = useRef(false);
   const box = useRef<HTMLDivElement>(null);
@@ -202,10 +207,12 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
     setChips([]); setStage("busy"); setBusy(true);
     for (const p of parts) {
       setTyping(true);
-      await sleep(typeof p === "string" ? Math.min(900, 350 + p.length * 5) : 450);
+      await sleep(typeof p === "string" ? thinkMs(p) : 500);
       if (!alive.current) return;
       setTyping(false);
       push(typeof p === "string" ? { k: "text", from: "bot", text: p } : p);
+      if (typeof p === "string") await sleep(streamMs(p));
+      if (!alive.current) return;
     }
     setStage(next); setChips(cs); setBusy(false);
   }
@@ -259,7 +266,7 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   async function greet() {
     const name = ctx.current.me?.name.split(" ")[0] ?? "there";
     const needs = mineReports().filter((r) => reportStatus(r).grp === "needs");
-    void name; const parts: (string | Part)[] = [direct ? { k: "stage" } : { k: "hero" }]; hasStage.current = !!direct;
+    void name; const parts: (string | Part)[] = [{ k: "hero" }]; hasStage.current = false;
     const cs = idleChips().filter((c) => c.label !== "Add photos");
     if (needs.length) {
       needs.slice(0, 2).forEach((r) => { needsShown.current.add(r.id); tracked.current.add(r.id); });
@@ -703,30 +710,37 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   useEffect(() => {
     alive.current = true;
     ctx.current.s.alerts.forEach((a) => seenAlerts.current.add(a.id));
-    const t = setTimeout(() => { if (started.current) return; started.current = true; if (preset) void loadScenario(preset, true); else void greet(); }, 0);
+    const t = setTimeout(() => {
+      if (started.current) return; started.current = true;
+      if (restore) { setStage("idle"); setChips(idleChips()); setBusy(false); return; }
+      if (preset) void loadScenario(preset, true); else void greet();
+    }, 0);
     return () => { alive.current = false; clearTimeout(t); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!me || msgs.every((m) => m.old) || !msgs.some((m) => m.k === "text" && m.from === "me")) return;
+    const texts = msgs.filter((m): m is Msg & { k: "text" } => m.k === "text");
+    const first = texts.find((m) => m.from === "me")!; const last = texts[texts.length - 1];
+    saveThread(me.id, {
+      id: tid, kind: "home", title: first.text.length > 48 ? `${first.text.slice(0, 47)}…` : first.text, last: `${last.from === "me" ? "You: " : ""}${last.text}`, t: Date.now(),
+      msgs: msgs.filter((m) => !LIVE_ONLY.has(m.k)).map((x) => ({ ...x, old: undefined })).map((m) => (m.k === "text" && m.photos ? { ...m, photos: m.photos.map(slim) } : m.k === "summary" ? { ...m, photos: m.photos.map(slim) } : m)),
+    });
+  }, [msgs, me]);
 
   const onChip = (c: Chip) => { if (busy) return; setChips([]); if (!c.quiet) userSays(c.label); c.run(); };
   const placeholder = stage === "typeNumber" || stage === "typeNumber2" || stage === "fixNumber" ? "Type the unit number…" : stage === "fixDev" ? "Developer or contractor name…" : stage === "typeBrand" ? "Brand and number, e.g. Schindler 74821…" : stage === "typeAddress" ? "Building name, address…" : stage === "searchPlace" || stage === "place" ? "Search for a building…" : stage === "optContact" ? "Name and role, or skip…" : stage === "optNote" ? "Add a note, or skip…" : "Ask anything or describe what you saw…";
 
   return (
     <div className="absolute inset-0 flex flex-col bg-surface">
-      {onBack && (
-        <div className="shrink-0 border-b border-line bg-white"><div className="mx-auto grid w-full max-w-3xl grid-cols-[auto_1fr_auto] items-center gap-2 px-3 py-2">
-          <button onClick={onBack} aria-label="Back" className="grid h-9 w-9 place-items-center rounded-md border border-line text-ink/70 hover:bg-surface"><Icon n="back" s={16} /></button>
-          <div className="text-center text-[15px] font-semibold">Snap &amp; Lead</div>
-          <button onClick={onNew} aria-label="New chat" title="New chat" className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line text-muted hover:bg-surface"><Icon n="plus" s={15} /></button>
-        </div></div>
-      )}
 
       <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="mx-auto w-full max-w-3xl space-y-3.5 px-3 py-5 @3xl:px-4">
         {msgs.map((m) => <Bubble key={m.mid} m={m} onOpen={onOpen} onNeeds={(t) => { userSays(t); }} stage={{ photos: staged, add: () => fileRef.current?.click(), remove: removeStaged, analyse: () => void analyseStaged(), begin: beginStage, form: finishForm, busy }} />)}
-        {typing && <div className="flex items-center"><div className="sheet flex gap-1 px-3.5 py-3"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:240ms]" /></div></div>}
+        {typing && <Thinking />}
         {chips.length > 0 && !busy && (
           <div className="pop flex flex-wrap gap-2 pt-1">
             {chips.map((c, k) => (
-              <button key={k} onClick={() => onChip(c)} className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-[13px] font-medium transition hover:bg-surface ${c.tone === "red" ? "border-brand/50 bg-white text-brand" : c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : c.tone === "soft" ? "border-dashed border-brand/50 bg-white text-brand" : "border-line bg-white"}`}>
+              <button key={k} onClick={() => onChip(c)} className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-[13px] font-medium transition ${c.tone === "red" ? "border-brand/50 bg-white text-brand hover:bg-brand-soft" : c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : c.tone === "soft" ? "border-dashed border-brand/50 bg-white text-brand hover:bg-brand-soft" : "border-line bg-white hover:bg-surface"}`}>
                 {c.icon && <Icon n={c.icon} s={14} />}{c.label}
               </button>
             ))}
@@ -772,7 +786,7 @@ function Bubble({ m, onOpen, onNeeds, stage }: { m: Msg; onOpen: (id: string) =>
         {m.photos && m.photos.length > 0 && <div className="mb-2 flex max-w-[17rem] flex-wrap justify-end gap-1.5">{m.photos.slice(0, 6).map((p) => <PhotoTile key={p.id} p={p} className="!h-24 !w-24 shrink-0 !rounded-md" />)}</div>}
         <span className="whitespace-pre-wrap break-words">{m.text}</span></div></div>
     );
-    return <div className="pop"><div className="sheet whitespace-pre-wrap break-words px-4 py-3 text-[14px] leading-[21px]">{m.text}</div></div>;
+    return <div className="pop"><div className="sheet whitespace-pre-wrap break-words px-4 py-3 text-[14px] leading-[21px]">{m.old ? m.text : <StreamText text={m.text} />}</div></div>;
   }
   const wrap = (c: React.ReactNode) => <div className="pop min-w-0">{c}</div>;
   if (m.k === "form") return wrap(<FormCard m={m} onDone={stage.form} />);

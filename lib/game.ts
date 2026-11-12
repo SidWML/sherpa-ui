@@ -29,18 +29,19 @@ export function gameOf(s: State, userId: string) {
   while (days.has(d)) { streak++; d--; }
 
   const today = dayKey(now);
-  const snapToday = myReports.some((r) => dayKey(r.createdAt) === today);
+  const accepted = myTasksDone.filter((t) => t.kind === "accept");
+  const acceptedToday = accepted.some((t) => t.doneAt && dayKey(t.doneAt) === today);
   const doneToday = myTasksDone.filter((t) => t.doneAt && dayKey(t.doneAt) === today).length;
   const open = s.sherpa.tasks.filter((t) => !t.done && t.forUser === userId);
   const quests: Quest[] = [
-    { label: "Snap one lift or building", done: snapToday, xp: 30 },
+    { label: "Accept a new lead", done: acceptedToday, xp: 30 },
     { label: "Finish 3 to-dos", done: doneToday >= 3, xp: 20 },
     { label: "Clear everything overdue", done: open.every((t) => t.due >= now), xp: 20 },
   ];
 
   const badges: Badge[] = [
-    { id: "first", label: "First lead", hint: "Snap your first lift", icon: "camera", got: myReports.length >= 1 },
-    { id: "five", label: "Sharp eye", hint: "Send 5 leads", icon: "star", got: myReports.length >= 5 },
+    { id: "first", label: "First lead", hint: "Accept your first lead", icon: "flag", got: accepted.length >= 1 },
+    { id: "five", label: "Sharp eye", hint: "Accept 5 leads", icon: "star", got: accepted.length >= 5 },
     { id: "fast", label: "Quick hands", hint: "Finish 5 to-dos", icon: "bolt", got: myTasksDone.length >= 5 },
     { id: "win", label: "Deal closer", hint: "Win an opportunity", icon: "trophy", got: wins.length >= 1 },
     { id: "streak", label: "On a roll", hint: "3 days in a row", icon: "flag", got: streak >= 3 },
