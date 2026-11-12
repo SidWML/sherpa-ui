@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Snap & Lead: working proof of concept
 
-## Getting Started
-
-First, run the development server:
+A front-end working model of the Snap & Lead PRD (`Snap & Lead Product Requirements Document.md`).
+Everything runs in the browser. State is stored in `localStorage`; nothing is sent anywhere.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How to explore
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Sign in as **Alex Reyes** (reporter) and tap *Start a new report*.
+2. On the photos step, pick a **Demo scenario** (for example `B5` contract ended, `D1` building site, `A2` unsafe). It loads sample photos and tells you which answers to give.
+3. Create the report, then use **Demo controls** (top right) or the avatar menu to switch to the owner, manager, records, emergency or service role and act on it. The reporter's progress track and points update.
+4. **Demo controls** also jump the follow-up clock (+24h / +48h / +72h), go offline, take the photo reader down, or pause routing.
+5. **Case atlas** lists all 145 PRD cases. About 80 have a runnable scenario.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Roles (all 12)
 
-## Learn More
+Reporter, SC / EI / MOD / NI sales, account manager, sales manager, records steward, emergency desk, service team, leadership, administrator.
 
-To learn more about Next.js, take a look at the following resources:
+## Where things live
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Path | What |
+| --- | --- |
+| `lib/engine.ts` | Business rules: situation, score and reasons, tier, teams, tracks, points. No AI decides tier, owner or safety. |
+| `lib/store.tsx` | State, routing by team and area, follow-up clock, every desk action, seed data, offline queue. |
+| `lib/data.ts` | Users, areas, places, progress tracks, default config, the 145-case catalogue and scenario presets. |
+| `components/reporter/` | Reporter home, Snap flow, My reports, report detail, alerts, rewards. |
+| `components/desk/` | Sales, account, manager, records, emergency, service, leadership, admin desks. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Not built (stubs or out of scope)
 
-## Deploy on Vercel
+Real photo reading, maps, Salesforce / SAP, push notifications, SSO, languages, face blur, batch mode, escalator-owner rules beyond the PRD placeholders.
+All numbers are the PRD's Proposed values and are editable in the Administrator view.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Mock server and saved data
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The app keeps its data on a small mock server: `app/api/state/route.ts` reads and writes one JSON file, `.data/db.json`. Reloading the page keeps your changes, and two browser windows (for example a seller and a manager) see each other's changes within a few seconds. Who is signed in is stored per browser, not on the server.
+
+- Start over: use **Reset demo data** (Admin, or Demo controls), or delete `.data/db.json`.
+- If the saved data has an older shape, it is ignored and fresh seed data is loaded. The seed itself lives in `lib/sherpa.ts` (SHERPA data) and `lib/store.tsx` (Snap & Lead).
+- It is a demo backend: no login, no database, last write wins.
