@@ -156,8 +156,8 @@ export function visitorFor(s: State, o: Opp): string {
 const kindOfTeam = (team?: string | null): Opp["kind"] => (team === "NI" ? "newbuild" : team === "SC" ? "renewal" : team === "MOD" ? "modernisation" : "existing");
 
 export const OP = {
-  create(s: State, p: { title: string; kind: Opp["kind"]; accountId?: string; placeName: string; area: string; owner: string; source: Opp["source"]; value?: number; contact?: Opp["contact"]; stage?: OppStage; unrouted?: boolean }): Opp {
-    const o: Opp = { id: `OP-${s.sherpa.seq++}`, title: p.title, kind: p.kind, accountId: p.accountId, placeName: p.placeName, area: p.area, owner: p.owner, unrouted: p.unrouted, stage: p.stage ?? "new", createdAt: nowS(s), value: p.value, source: p.source, contact: p.contact, log: [] };
+  create(s: State, p: { title: string; kind: Opp["kind"]; accountId?: string; placeName: string; area: string; owner: string; source: Opp["source"]; value?: number; contact?: Opp["contact"]; stage?: OppStage; unrouted?: boolean; geo?: Opp["geo"] }): Opp {
+    const o: Opp = { id: `OP-${s.sherpa.seq++}`, geo: p.geo, title: p.title, kind: p.kind, accountId: p.accountId, placeName: p.placeName, area: p.area, owner: p.owner, unrouted: p.unrouted, stage: p.stage ?? "new", createdAt: nowS(s), value: p.value, source: p.source, contact: p.contact, log: [] };
     olog(s, o, p.source.reporter ?? p.owner, `Opportunity created from ${p.source.label}`);
     s.sherpa.opps.unshift(o);
     return o;

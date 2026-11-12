@@ -1,5 +1,5 @@
 import { PLACES } from "./data";
-import { isOpen, oppOf } from "./sherpa";
+import { isOpen, oppOf, KIND_LABEL } from "./sherpa";
 import type { Opp, State } from "./types";
 
 /** The three things a seller wants to see on one map. */
@@ -34,6 +34,7 @@ export const OTHER_CLIENTS: { id: string; name: string; addr: string; area: stri
 const jit = (k: string) => { let h = 0; for (const ch of k) h = (h * 31 + ch.charCodeAt(0)) | 0; return [((h & 255) / 255 - 0.5) * 0.0026, (((h >> 8) & 255) / 255 - 0.5) * 0.0026] as const; };
 
 export function locateOpp(s: State, o: Opp): { lat: number; lng: number } | null {
+  if (o.geo) { const [dy, dx] = jit(o.id); return { lat: o.geo.lat + dy, lng: o.geo.lng + dx }; }
   const rep = o.source.reportId ? s.reports.find((r) => r.id === o.source.reportId) : undefined;
   const pid = rep?.placeId ?? (o.tenderId ? s.sherpa.accounts.find((a) => a.id === s.sherpa.tenders.find((t) => t.id === o.tenderId)?.accountId)?.placeIds[0] : undefined)
     ?? PLACES.find((p) => p.name === o.placeName)?.id ?? s.sherpa.accounts.find((a) => a.id === o.accountId)?.placeIds[0];
@@ -52,10 +53,10 @@ export function buildPins(s: State, meId: string, mineIds: Set<string>, now: num
     const at = locateOpp(s, o); if (!at) continue;
     const early = ["new", "contact", "visit", "qualify"].includes(o.stage);
     out.push({
-      id: o.id, layer: "lead", name: o.title, sub: o.placeName, area: o.area, ...at, oppId: o.id, accountId: o.accountId, mine: mineIds.has(o.id), hot: early,
+      id: o.id, layer: "lead", name: o.placeName, sub: `${KIND_LABEL[o.kind]} · ${o.id}`, area: o.area, ...at, oppId: o.id, accountId: o.accountId, mine: mineIds.has(o.id), hot: early,
       key: !!s.sherpa.accounts.find((a) => a.id === o.accountId)?.key,
       facts: [["Opportunity", o.id], ["Stage", o.stage[0].toUpperCase() + o.stage.slice(1)], ["Value", o.value ? `₹${(o.value / 1e5).toFixed(1)} L` : "Not priced yet"], ["Source", o.source.label]],
-      why: early ? "Early stage: the first call or visit decides this one" : "In progress",
+      why: ({ new: "New lead: waiting to be accepted", contact: "Accepted: needs a first contact", visit: "Site visit to plan", qualify: "Ready to qualify", bid: "Bid being prepared", offer: "Offer being prepared", sent: "Offer sent: waiting for the customer" } as Record<string, string>)[o.stage] ?? "In progress",
     });
   }
   /* Schindler clients: one pin per account site */
@@ -79,6 +80,7 @@ export function buildPins(s: State, meId: string, mineIds: Set<string>, now: num
   }
   /* other clients: served by another maker */
   for (const c of OTHER_CLIENTS) {
+    if (s.sherpa.opps.some((o) => o.source.itemId === c.id)) continue; // already a lead
     out.push({
       id: c.id, layer: "other", name: c.name, sub: c.addr, area: c.area, lat: c.lat, lng: c.lng,
       facts: [["Served by", c.maker], ["Lifts", String(c.lifts)], ["Lift age", `${c.age} years`], ["Contract ends", c.contractEnds]],

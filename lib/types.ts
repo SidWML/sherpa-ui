@@ -180,6 +180,8 @@ export interface Opp {
   source: { type: "snap" | "tender" | "nba" | "campaign"; reportId?: string; itemId?: string; reporter?: string; label: string };
   contact?: { name: string; role: string; phone?: string; email?: string; via: string };
   tenderId?: string; offerId?: string; visitBy?: string; visited?: boolean;
+  /** Where it is on the map, when the place is not in the places list. */
+  geo?: { lat: number; lng: number };
   log: LogEntry[];
 }
 export interface Past { id: string; area: string; product: ProductKey; price: number; discountPct: number; outcome: "won" | "lost"; at: number; customer: string }

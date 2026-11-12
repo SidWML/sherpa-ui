@@ -51,3 +51,9 @@ Tags and chips are square-ish (6px). No pills, no fully round shapes except avat
 - Progress: one thin line (`Line`) in lists, a numbered `Stepper` in detail.
 - Detail view: right-hand drawer, 60% wide, page dimmed behind.
 - Chat: bot messages are sheets, the user's message is a brand block, quick replies are bordered buttons inside the conversation.
+
+## Territory map
+
+- Real street map (OpenStreetMap tiles, pan/zoom/pinch, no map library). Pins: Leads (red, flame), Schindler clients (blue, shield), Other clients (grey, flag). An amber dot means needs attention.
+- Filters: layer toggles with counts, area, search, My patch, Key accounts. Nearby pins merge into a square count bubble with a colour strip showing the mix.
+- Side panel lists the places in view, hot first. Selecting one shows why now, facts and three actions: open it, ask SHERPA, directions. A competitor-served building offers Add as a lead.

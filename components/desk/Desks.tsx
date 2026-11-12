@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { A, H, effTier, exceptions, itemsFor, nowOf, stepsOf, useApp, userOf } from "@/lib/store";
 import { AREAS, GROUPS, PLACES, ROLE_LABEL, TEAM_NAME, TRACKS, USERS } from "@/lib/data";
 import type { Item, Report, Role, Team, Tier } from "@/lib/types";
+import { TerritoryMap } from "../hub/TerritoryMap";
 import { Shell, type NavItem } from "../Shell";
 import { Frame } from "../hub/Frame";
 import { Alerts } from "../reporter/ReporterApp";
@@ -33,7 +34,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
   const unread = s.alerts.filter((a) => a.userId === me!.id && !a.read).length;
   const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).length;
   const N = (id: string, label: string, icon: string, badge?: number, narrowOnly?: boolean): NavItem => ({ id, label, icon, badge: badge || undefined, narrowOnly });
-  const front = sherpa ? [N("work", "My work", "list", mine), N("chat", "Chat", "sparkle", undefined, true)] : [];
+  const front = sherpa ? [N("work", "My work", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)] : [];
   const byRole: Record<string, NavItem[]> = {
     ni: [], ei: [N("portfolio", "Portfolio", "layers")], sc: [N("portfolio", "Portfolio", "layers")], mod: [N("portfolio", "Portfolio", "layers")], ss: [],
     am: [N("accounts", "Key accounts", "users"), N("portfolio", "Portfolio", "layers")], mkt: [N("campaigns", "Campaigns and leads", "send")],
@@ -60,6 +61,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
       <>
         {!w && sherpa && <div className={v === "chat" ? "absolute inset-0" : "hidden"}><ChatHome seed={seed} openOpp={openOpp} openOffer={openOffer} go={goTo} /></div>}
         {v === "work" && <MyWork openId={oppId} setOpenId={setOppId} openOffer={openOffer} onAsk={(o) => ask(`Where is ${o.id} (${o.placeName})?`)} />}
+        {v === "map" && <TerritoryMap onOpenOpp={openOpp} onAsk={(p) => ask(p)} />}
         {v === "offer" && offerId && <OfferPage id={offerId} onBack={() => { if (offer?.oppId) setOppId(offer.oppId); setView("work"); }} />}
         {v === "portfolio" && <Portfolio onAsk={ask} />}
         {v === "campaigns" && <Campaigns onAsk={ask} />}
