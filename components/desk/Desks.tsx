@@ -6,8 +6,8 @@ import type { Item, Report, Role, Team, Tier } from "@/lib/types";
 import { TerritoryMap } from "../hub/TerritoryMap";
 import { BidPage } from "./Bid";
 import { Shell, type NavItem } from "../Shell";
-import { Frame } from "../hub/Frame";
-import { Alerts } from "../reporter/ReporterApp";
+import { Frame } from "../Frame";
+import { Alerts } from "../shared";
 import { Btn, Card, Empty, Field, Icon, PhotoTile, Pill, Section, TierPill, ago } from "../ui";
 import { ClockBadge, ItemPanel, Kpi, Page, Sel, StatusPill } from "./Common";
 import { Back, Label, NbaCard, nbaFor } from "./Action";
@@ -42,7 +42,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
     mgr: [N("team", "Team pipeline", "chart")],
     admin: [N("rules", "Rules and routing", "gear"), N("nba", "NBA catalogue", "sparkle"), N("agents", "Agent registry", "bolt"), N("crmlog", "NewCRM write-backs", "doc"), N("audit", "Audit log", "list"), N("users", "Users and areas", "users")],
   };
-  const nav: NavItem[] = [...front, ...(byRole[role] ?? []), N("alerts", "Alerts", "bell", unread)];
+  const nav: NavItem[] = [...front, ...(byRole[role] ?? []), { ...N("alerts", "Alerts", "bell", unread), inBell: true }];
 
   const openOpp = (id: string) => { setOppId(id); setView("work"); };
   /** An id that starts with T- is a tender: it opens the bid builder. */
@@ -53,7 +53,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
   const goTo = (v: string) => {
     if (v.startsWith("work:")) return openOpp(v.slice(5));
     if (v === "work" || v === "opps" || v === "offers") setOppId(null);
-    const d = v === "today" || v === "me" || v === "home" ? "work" : v === "snap" || v === "ask" ? "chat" : v === "opps" || v === "offers" ? "work" : v;
+    const d = v === "today" || v === "me" || v === "home" ? "work" : v === "ask" ? "chat" : v === "opps" || v === "offers" ? "work" : v;
     if (d === "chat" && wide) return;
     setView(d);
   };
@@ -73,7 +73,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
         {v === "nba" && <Catalogue />}
         {v === "agents" && <AgentRegistry />}
         {v === "crmlog" && <CrmLog />}
-        {v === "alerts" && <Alerts onOpen={() => {}} />}
+        {v === "alerts" && <Alerts />}
         {v === "rules" && <AdminRules />}
         {v === "audit" && <AuditLog />}
         {v === "users" && <AdminUsers />}

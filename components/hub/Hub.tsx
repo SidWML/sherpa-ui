@@ -1,34 +1,20 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
-import { gameOf } from "@/lib/game";
-import { AREA_NAME, KIND_LABEL, STAGES, inr, isOpen, oppOf, tasksOfOpp, offerOf } from "@/lib/sherpa";
-import type { NbaCard } from "@/lib/sherpa";
+import { AREA_NAME, KIND_LABEL, STAGES, inr, isOpen, oppOf, tasksOfOpp } from "@/lib/sherpa";
 import type { Opp } from "@/lib/types";
-import { Btn, Icon, Pill, ago } from "../ui";
+import { Icon, ago } from "../ui";
 import { Sherpa, type Seed } from "../desk/Sherpa";
 import { OppPage, statusLine } from "../desk/Opps";
-import { Assistant } from "../reporter/Assistant";
 import { involvedOpps } from "./parts";
-import { OwnerDot, Stat2, T, Line, pageList } from "../reporter/ReporterApp";
+import { OwnerDot, Stat2, StatRow, T, Line, pageList } from "../shared";
 
 /* ------------------------------------------------------------------ Chat: the home screen */
-export function ChatHome({ snapReq, seed, openOpp, openOffer, go, compact }: { compact?: boolean; snapReq?: number; seed: Seed | null; openOpp: (id: string) => void; openOffer: (id: string) => void; go: (v: string) => void }) {
-  const { s } = useApp();
-  const [snap, setSnap] = useState(false); const [snapUsed, setSnapUsed] = useState(false); const [snapKey, setSnapKey] = useState(0);
-  const open = () => { setSnap(true); setSnapUsed(true); };
-  useEffect(() => { if (snapReq) { setSnap(true); setSnapUsed(true); } }, [snapReq]); // eslint-disable-line react-hooks/set-state-in-effect
+export function ChatHome({ seed, openOpp, openOffer, go, compact }: { compact?: boolean; seed: Seed | null; openOpp: (id: string) => void; openOffer: (id: string) => void; go: (v: string) => void }) {
   return (
     <div className="absolute inset-0 flex">
       <div className="relative min-w-0 flex-1">
-        <Sherpa seed={seed} onOpenOffer={openOffer} onOpenOpp={openOpp} onOpenLead={() => go("work")} onSnap={open} noDash={compact} go={go} />
-        {snapUsed && (
-          <div className={`absolute inset-0 z-10 flex-col bg-surface ${snap ? "flex" : "hidden"}`}>
-            <div className="relative min-h-0 flex-1">
-              <Assistant key={snapKey} direct onBack={() => setSnap(false)} onOpen={(rid) => { setSnap(false); const o = s.sherpa.opps.find((x) => x.source.reportId === rid); if (o) openOpp(o.id); else go("work"); }} onNew={() => setSnapKey((k) => k + 1)} />
-            </div>
-          </div>
-        )}
+        <Sherpa seed={seed} onOpenOffer={openOffer} onOpenOpp={openOpp} onOpenLead={() => go("work")} noDash={compact} go={go} />
       </div>
     </div>
   );
@@ -45,8 +31,8 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
   const ALL_COLS = { type: true, stage: true, move: true, value: true, owner: true, updated: true };
   const [vis, setVis] = useState(ALL_COLS); const [panel, setPanel] = useState(false);
   const [checked, setChecked] = useState<string[]>([]); const [view, setView] = useState<"list" | "grid">("list"); const [menu, setMenu] = useState<string | null>(null);
-  const box = useRef<HTMLDivElement>(null); const [wide, setWide] = useState(false);
-  useEffect(() => { const el = box.current; if (!el) return; const ro = new ResizeObserver(() => setWide(el.clientWidth >= 1200)); ro.observe(el); return () => ro.disconnect(); }, []);
+  const box = useRef<HTMLDivElement>(null); const [wide, setWide] = useState(false); const [narrow, setNarrow] = useState(false);
+  useEffect(() => { const el = box.current; if (!el) return; const ro = new ResizeObserver(() => { setWide(el.clientWidth >= 1200); setNarrow(el.clientWidth < 640); }); ro.observe(el); return () => ro.disconnect(); }, []);
   const all = involvedOpps(s, me!.id, me!.role);
   const needs = (o: Opp) => isOpen(o) && tasksOfOpp(s, o.id).some((t) => t.forUser === me!.id);
   const lists: Record<Tab, Opp[]> = {
@@ -84,17 +70,30 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
   const stageTag = (o: Opp) => <span className="inline-flex items-center gap-2 text-[13px] font-medium"><span className="h-2 w-2 rounded-full" style={{ background: stageDot(o) }} />{stageOf(o)}</span>;
   const tile = (o: Opp) => { const kt = KIND_T[o.kind]; return <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md" style={{ background: kt.bg, color: kt.fg }}><Icon n={o.kind === "newbuild" || o.kind === "project" ? "layers" : o.kind === "renewal" ? "shield" : o.kind === "modernisation" ? "gear" : "pin"} s={18} /></span>; };
   const check = (on: boolean, fn: (e: React.MouseEvent) => void) => <span role="checkbox" aria-checked={on} onClick={fn} className={`grid h-[18px] w-[18px] cursor-pointer place-items-center rounded-sm border ${on ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{on && <Icon n="check" s={12} w={3} />}</span>;
+  useEffect(() => { if (open && narrow) box.current?.closest("main")?.scrollTo(0, 0); }, [open, narrow]);
+  const askAbout = (o: Opp) => <button onClick={() => { setOpenId(null); onAsk(o); }} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap @md:flex-none rounded-md border border-brand bg-white px-4 text-[13.5px] font-semibold text-brand hover:bg-brand-soft"><Icon n="sparkle" s={15} /> Ask SHERPA about this</button>;
   return (
-    <div ref={box} className="w-full p-4 @3xl:p-6">
+    <div ref={box} className="@container w-full">
+      {open && narrow ? (
+        <div className="flex min-h-full w-full flex-col bg-surface">
+          <div className="sticky top-0 z-10 shrink-0 border-b border-line bg-white px-4 pb-3 pt-2.5">
+            <button onClick={() => setOpenId(null)} className="-ml-1.5 mb-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium text-ink/70 hover:bg-surface hover:text-ink"><Icon n="back" s={15} /> My work</button>
+            <div className="t-label">Opportunity · {open.id}</div><div className="text-[18px] font-semibold leading-tight">{open.title}</div>
+          </div>
+          <div className="@container flex-1"><OppPage embedded id={open.id} onBack={() => setOpenId(null)} openOffer={openOffer} /></div>
+          <div className="sticky bottom-0 flex shrink-0 border-t border-line bg-white px-4 py-3">{askAbout(open)}</div>
+        </div>
+      ) : (
+    <div className="p-4 @3xl:p-6">
       <h1 className="text-[28px] font-semibold leading-tight tracking-tight">My work</h1>
       <p className="t-small mt-0.5">Every lead, tender and offer is one opportunity. Click a row for the full detail, or press Ask to work on it with SHERPA.</p>
-      <div className="mt-5 grid grid-cols-2 gap-3 @3xl:grid-cols-5">
+      <StatRow>
         <Stat2 icon="warn" label="Needs my action" value={lists.needs.length} tone={T.orange} active={tab === "needs"} onClick={() => go("needs")} />
         <Stat2 icon="clock" label="Waiting on others" value={lists.waiting.length} tone={T.blue} active={tab === "waiting"} onClick={() => go("waiting")} />
         <Stat2 icon="layers" label="All active" value={lists.active.length} tone={T.red} active={tab === "active"} onClick={() => go("active")} />
         <Stat2 icon="check" label="Closed" value={lists.closed.length} tone={T.green} active={tab === "closed"} onClick={() => go("closed")} />
         <Stat2 icon="star" label="Open pipeline" value={<span className="whitespace-nowrap text-[19px]" title={inr(pipeline)}>{short(pipeline)}</span>} tone={T.gold} />
-      </div>
+      </StatRow>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <label className="flex min-h-10 min-w-[14rem] flex-1 items-center gap-2 rounded-md border border-line bg-white px-3 text-muted focus-within:border-brand"><Icon n="search" s={15} /><input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by place, opportunity or ID…" className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-muted" /></label>
         <select aria-label="Status" value={tab} onChange={(e) => go(e.target.value as Tab)} className={sel2}><option value="needs">Needs my action</option><option value="waiting">Waiting on others</option><option value="active">All active</option><option value="closed">Closed</option></select>
@@ -163,48 +162,21 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
           )}
         </div>
       )}
-      {open && (
+      {open && !narrow && (
         <>
           <button aria-label="Close" onClick={() => setOpenId(null)} className="fixed inset-0 z-40 bg-ink/35" />
-          <aside className="pop float fixed inset-y-0 right-0 z-50 flex w-full max-w-[40rem] flex-col border-l border-line bg-white">
+          <aside className="@container pop float fixed bottom-0 right-0 top-[var(--safe-top,0px)] z-50 flex w-full max-w-[40rem] flex-col border-l border-line bg-white pb-[var(--safe-bottom,0px)]">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-3.5">
               <div className="min-w-0"><div className="t-label">Opportunity · {open.id}</div><div className="truncate text-[17px] font-semibold leading-tight">{open.title}</div></div>
               <button aria-label="Close" onClick={() => setOpenId(null)} className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={16} /></button>
             </div>
             <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto bg-surface"><OppPage embedded id={open.id} onBack={() => setOpenId(null)} openOffer={openOffer} /></div>
-            <div className="flex shrink-0 items-center gap-3 border-t border-line bg-white px-5 py-3"><span className="mr-auto t-small">Want a hand with this one?</span><button onClick={() => { setOpenId(null); onAsk(open); }} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-brand bg-white px-4 text-[13.5px] font-semibold text-brand hover:bg-brand-soft"><Icon n="sparkle" s={15} /> Ask SHERPA about this</button></div>
+            <div className="flex shrink-0 items-center gap-3 border-t border-line bg-white px-5 py-3"><span className="mr-auto hidden t-small @md:inline">Want a hand with this one?</span>{askAbout(open)}</div>
           </aside>
         </>
       )}
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ Rewards: the fun page */
-export function Rewards({ go }: { go: (v: string) => void }) {
-  const { s, me, now } = useApp();
-  const g = gameOf(s, me!.id);
-  const events = s.reports.filter((r) => r.reporterId === me!.id).flatMap((r) => r.points.filter((p) => p.pts > 0).map((p) => ({ ...p, rid: r.id }))).sort((a, b) => b.at - a.at).slice(0, 6);
-  const tile = (n: number, l: string) => <div className="rounded-xl border border-line bg-white p-3 text-center"><div className="num text-2xl font-semibold">{n}</div><div className="text-[11.5px] text-muted">{l}</div></div>;
-  return (
-    <div className="mx-auto h-full max-w-3xl overflow-y-auto p-3 @xl:p-6">
-      <div className="rounded-3xl bg-ink p-5 text-white @xl:p-6">
-        <div className="flex items-start justify-between"><div><div className="text-[11px] uppercase tracking-[.12em] text-white/60">Your level</div><div className="text-3xl font-semibold tracking-tight">{g.level}</div></div><div className="text-right"><div className="num text-4xl font-semibold">{g.xp}</div><div className="text-xs text-white/60">XP</div></div></div>
-        <div className="mt-4 h-3 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-brand transition-all duration-1000" style={{ width: `${Math.max(4, g.pct)}%` }} /></div>
-        <div className="mt-2 flex justify-between text-[12.5px] text-white/75"><span>{g.next ? `${g.next.from - g.xp} XP to ${g.next.name}` : "Top level reached"}</span><span>{g.streak > 0 ? `${g.streak}-day streak` : "Start a streak today"}</span></div>
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-2.5">{tile(g.leads, "Leads sent")}{tile(g.doneTasks, "To-dos done")}{tile(g.wins, "Deals won")}</div>
-      <h2 className="mb-2 mt-6 t-label">Today&apos;s quests</h2>
-      <div className="space-y-2">{g.quests.map((q) => <div key={q.label} className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-[14px] ${q.done ? "border-emerald-200 bg-emerald-50" : "border-line bg-white"}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full ${q.done ? "bg-emerald-500 text-white" : "border border-line"}`}>{q.done && <Icon n="check" s={14} />}</span><span className="flex-1 font-medium">{q.label}</span><b className="num text-sm text-muted">+{q.xp} XP</b></div>)}</div>
-      <Btn full className="mt-3" onClick={() => go("chat")}><Icon n="camera" s={16} /> Snap a lift now</Btn>
-      <h2 className="mb-2 mt-6 t-label">Badges</h2>
-      <div className="grid grid-cols-2 gap-2.5 @xl:grid-cols-5">{g.badges.map((b) => <div key={b.id} className={`rounded-2xl border p-3 text-center ${b.got ? "border-brand/30 bg-brand-soft" : "border-line bg-white opacity-60"}`}><span className={`mx-auto grid h-10 w-10 place-items-center rounded-full ${b.got ? "bg-brand text-white" : "bg-surface text-muted"}`}><Icon n={b.icon} s={18} /></span><div className="mt-2 text-[13px] font-semibold">{b.label}</div><div className="text-[11px] text-muted">{b.got ? "Earned" : b.hint}</div></div>)}</div>
-      <h2 className="mb-2 mt-6 t-label">How you earn XP</h2>
-      <div className="rounded-xl border border-line bg-white px-4 py-1 text-[13px]">{[["Send a lead with a photo", "up to 50"], ["Lead accepted by the owner", "+20"], ["Finish a to-do", "+10"], ["Your lead becomes a won deal", "+200"]].map(([k, v]) => <div key={k} className="flex justify-between border-b border-line/70 py-2.5 last:border-0"><span>{k}</span><b className="num">{v}</b></div>)}</div>
-      {events.length > 0 && <><h2 className="mb-2 mt-6 t-label">Recent points</h2>
-        <div className="rounded-xl border border-line bg-white px-4 py-1 text-[13px]">{events.map((e) => <div key={e.id} className="flex justify-between gap-3 border-b border-line/70 py-2.5 last:border-0"><span className="min-w-0 truncate">{e.label} <span className="text-muted">· {e.rid} · {ago(now - e.at)} ago</span></span><b className="num text-emerald-700">+{e.pts}</b></div>)}</div></>}
-      <div className="h-6" />
+      )}
     </div>
   );
 }
-void offerOf;

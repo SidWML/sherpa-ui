@@ -4,8 +4,9 @@ import { useApp, pointsOf } from "@/lib/store";
 import { gameOf } from "@/lib/game";
 import { LEVELS, ROLE_LABEL } from "@/lib/data";
 import { Avatar, Icon, Logo, Pill } from "./ui";
+import { SCREEN, useDeviceSwitch } from "./Device";
 
-export interface NavItem { id: string; label: string; icon: string; badge?: number; narrowOnly?: boolean }
+export interface NavItem { id: string; label: string; icon: string; badge?: number; narrowOnly?: boolean; inBell?: boolean }
 
 export function levelOf(pts: number) {
   let i = 0; LEVELS.forEach((l, k) => { if (pts >= l.from) i = k; });
@@ -15,7 +16,7 @@ export function levelOf(pts: number) {
 
 export function StatusBar() {
   return (
-    <div className="flex h-11 shrink-0 items-end justify-between bg-white px-7 pb-1 text-[13px] font-semibold">
+    <div className="flex shrink-0 items-center justify-between bg-white pl-[42px] pr-[30px] pt-1 text-[15px] font-semibold" style={{ height: SCREEN.statusBar }}>
       <span>9:41</span>
       <span className="flex items-center gap-1.5"><Icon n="wifi" s={14} /><svg width="22" height="11" viewBox="0 0 22 11"><rect x="0.5" y="0.5" width="18" height="10" rx="3" fill="none" stroke="currentColor" opacity=".5" /><rect x="2" y="2" width="14" height="7" rx="1.8" fill="currentColor" /><rect x="19.5" y="3.5" width="2" height="4" rx="1" fill="currentColor" opacity=".5" /></svg></span>
     </div>
@@ -23,8 +24,9 @@ export function StatusBar() {
 }
 
 export function Shell({ nav, view, setView, children, onDemo, framed }: { nav: NavItem[]; view: string; setView: (v: string) => void; children: ReactNode; onDemo: () => void; framed?: boolean }) {
-  const { s, me, login, setOffline } = useApp();
+  const { s, me, setOffline } = useApp();
   const [menu, setMenu] = useState(false);
+  const device = useDeviceSwitch();
   if (!me) return null;
   const unread = s.alerts.filter((a) => a.userId === me.id && !a.read).length;
   const pts = me.role === "reporter" ? pointsOf(s, me.id).confirmed : null;
@@ -58,8 +60,8 @@ export function Shell({ nav, view, setView, children, onDemo, framed }: { nav: N
               <div className="text-sm font-semibold">{me.name}</div>
               <div className="text-xs text-muted">{me.title}</div>
               <div className="mt-1"><Pill tone="red">{ROLE_LABEL[me.role]}</Pill></div>
-              <button onClick={() => { setMenu(false); onDemo(); }} className={`mt-3 w-full rounded-lg bg-surface px-3 py-2 text-left text-sm ${framed ? "" : "@xl:hidden"}`}>Demo controls</button>
-              <button onClick={() => { setMenu(false); login(null); }} className="mt-2 flex w-full items-center gap-2 rounded-lg bg-surface px-3 py-2 text-left text-sm font-medium"><Icon n="swap" s={15} /> Switch role / sign out</button>
+              <button onClick={() => { setMenu(false); onDemo(); }} className="mt-3 flex w-full items-center gap-2 rounded-lg bg-surface px-3 py-2 text-left text-sm font-medium"><Icon n="swap" s={15} /> Switch role</button>
+              {device && <button onClick={() => { setMenu(false); device.set(device.dev === "phone" ? "desktop" : "phone"); }} className="mt-2 flex w-full items-center gap-2 rounded-lg bg-surface px-3 py-2 text-left text-sm font-medium"><Icon n="phone" s={15} /> {device.dev === "phone" ? "Desktop view" : "Phone view"}</button>}
             </div>
           )}
         </div>
@@ -76,7 +78,7 @@ export function Shell({ nav, view, setView, children, onDemo, framed }: { nav: N
         </aside>
         <main className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden scroll-thin">{children}</main>
       </div>
-      <nav className={`flex shrink-0 overflow-x-auto border-t border-line bg-white @3xl:hidden ${framed ? "pb-5" : ""}`}>
+      <nav className={`flex shrink-0 overflow-x-auto border-t border-line bg-white @3xl:hidden ${framed ? "pb-[34px]" : ""}`}>
         {nav.map((n) => (
           <button key={n.id} onClick={() => setView(n.id)} className={`relative flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2 text-[10.5px] font-medium ${view === n.id ? "text-brand" : "text-muted"}`}>
             <Icon n={n.icon} s={20} />{n.label}

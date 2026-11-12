@@ -6,7 +6,7 @@ import { AREA_NAME, OP, NAMES, addTask } from "@/lib/sherpa";
 import { USERS } from "@/lib/data";
 import { Icon } from "../ui";
 import { involvedOpps } from "./parts";
-import { T } from "../reporter/ReporterApp";
+import { T } from "../shared";
 
 /* ------------------------------------------------------------------ web-mercator maths (no map library needed) */
 const TS = 256;

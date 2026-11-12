@@ -63,6 +63,13 @@ export const USERS: User[] = [
   { id: "admin", name: "Product Admin", role: "admin", title: "SHERPA product team", initials: "PA", blurb: "Rules, NBA catalogue, agent registry, thresholds, owners, audit log, pause routing." },
 ];
 
+export type AppId = "sherpa" | "snap";
+/** Who can use each app. A reporter never appears in SHERPA and a seller never appears in Snap & Lead. */
+export const APPS: Record<AppId, { name: string; home: string; users: User[] }> = {
+  sherpa: { name: "SHERPA", home: "marc", users: USERS.filter((u) => u.role !== "reporter" && !u.hidden) },
+  snap: { name: "Snap & Lead", home: "alex", users: USERS.filter((u) => u.role === "reporter") },
+};
+
 export const ROLE_LABEL: Record<Role, string> = {
   reporter: "Lead generator", sc: "SC sales rep", ei: "EI / REP sales rep", mod: "MOD sales rep",
   ni: "NI sales rep", am: "Account manager", mgr: "Sales manager", rs: "Records steward",
@@ -285,3 +292,14 @@ export const roleHome: Record<Role, string> = {
   reporter: "home", sc: "leads", ei: "leads", mod: "leads", ni: "leads", am: "accounts", mgr: "exceptions",
   rs: "queue", ed: "inbox", svc: "tickets", lead: "dashboard", admin: "rules", ss: "today", mkt: "today",
 };
+
+/** Other lead generators in the region, for the leaderboard. Demo figures: confirmed points, leads sent and wins. */
+export const LEAD_PEERS = [
+  { id: "p-kiran", name: "Kiran Kumar", initials: "KK", area: "Secunderabad", pts: 620, leads: 21, won: 2 },
+  { id: "p-ayesha", name: "Ayesha Khan", initials: "AK", area: "Gachibowli", pts: 480, leads: 17, won: 1 },
+  { id: "p-ravi", name: "Ravi Teja", initials: "RT", area: "Kukatpally", pts: 410, leads: 15, won: 1 },
+  { id: "p-sneha", name: "Sneha Patel", initials: "SP", area: "Banjara Hills", pts: 290, leads: 12, won: 0 },
+  { id: "p-vikram", name: "Vikram Singh", initials: "VS", area: "Madhapur", pts: 240, leads: 10, won: 0 },
+  { id: "p-deepa", name: "Deepa Iyer", initials: "DI", area: "Warangal", pts: 180, leads: 7, won: 0 },
+  { id: "p-rahul", name: "Rahul Menon", initials: "RM", area: "Begumpet", pts: 120, leads: 5, won: 0 },
+];

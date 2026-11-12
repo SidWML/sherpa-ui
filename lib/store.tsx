@@ -2,13 +2,13 @@
 import { OP, seedSherpa } from "./sherpa";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Alert, Draft, Input, Item, Photo, PointStatus, Report, State, Team, Tier } from "./types";
-import { DEFAULT_CFG, GLOBAL_OWNER, PLACES, PRESETS, TRACKS, USERS } from "./data";
+import { APPS, DEFAULT_CFG, GLOBAL_OWNER, PLACES, PRESETS, TRACKS, USERS, type AppId } from "./data";
 import { baseInput, evaluate, presetToInput, tierOf } from "./engine";
 
 export const H = 3600000;
-const KEY = "snaplead-poc-v5";
-const USER_KEY = "snaplead-user";
-export const STATE_VERSION = 6;
+const KEY = "snaplead-poc-v7";
+const USER_KEY: Record<AppId, string> = { sherpa: "sherpa-user", snap: "snaplead-user" };
+export const STATE_VERSION = 7;
 
 export const userOf = (id?: string | null) => USERS.find((u) => u.id === id);
 export const nowOf = (s: State) => Date.now() + s.clock;
@@ -392,36 +392,36 @@ export function seed(): State {
   const s: State = { reports: [], alerts: [], audit: [], cfg: structuredClone(DEFAULT_CFG), clock: 0, offline: false, userId: null, seq: 100, sherpa: seedSherpa(), v: STATE_VERSION };
   const adv = (h: number) => { s.clock += h * H; };
   // 1: Alex, Riverside, local-firm lift, accepted + contacted ("In progress")
-  const r1 = seedReport(s, "sofia", "riverside", "C1", 2, (i) => { i.age = 18; i.condition = "minor"; i.units = 3; i.contact = true; });
+  const r1 = seedReport(s, "alex", "riverside", "C1", 2, (i) => { i.age = 18; i.condition = "minor"; i.units = 3; i.contact = true; });
   s.clock = 0;
   const l1 = r1.items.find((x) => x.kind === "lead")!; A.accept(s, l1.id, "ethan"); A.contact(s, l1.id, "ethan", "Called the building manager");
   // 2: Alex, City Mall, renewal won yesterday
-  const r2 = seedReport(s, "sofia", "citymall", "B5", 30, (i) => { i.condition = "fine"; });
+  const r2 = seedReport(s, "alex", "citymall", "B5", 30, (i) => { i.condition = "fine"; });
   const l2 = r2.items.find((x) => x.kind === "lead")!; A.accept(s, l2.id, "sofia"); A.outcome(s, l2.id, "sofia", "won");
   // 3: Alex, Tech Park, missing lift in records (records update)
-  const r3 = seedReport(s, "sofia", "techpark", "B13", 48, (i) => { i.condition = "fine"; });
+  const r3 = seedReport(s, "alex", "techpark", "B13", 48, (i) => { i.condition = "fine"; });
   A.accept(s, r3.items.find((x) => x.kind === "records")!.id, "priya");
   // 4: Tom, minor fault ours
-  seedReport(s, "mia", "riverside", "B2", 3, (i) => { i.condition = "minor"; });
+  seedReport(s, "tom", "riverside", "B2", 3, (i) => { i.condition = "minor"; });
   // 5: Tom, building site Hot, 50h without action
-  seedReport(s, "mia", "harbour", "D1", 50, (i) => { i.stage = "structure"; i.ordered = false; i.contact = false; });
+  seedReport(s, "tom", "harbour", "D1", 50, (i) => { i.stage = "structure"; i.ordered = false; i.contact = false; });
   // 6: Tom, Warangal site, no NI rep
-  seedReport(s, "mia", "rhine", "D9", 5, (i) => { i.stage = "early"; });
+  seedReport(s, "tom", "rhine", "D9", 5, (i) => { i.stage = "early"; });
   // 7: unsafe, nobody hurt, ours, mall
-  seedReport(s, "mia", "citymall", "A2", 0.3, (i) => { i.condition = "unsafe"; i.hurt = "no"; });
+  seedReport(s, "tom", "citymall", "A2", 0.3, (i) => { i.condition = "unsafe"; i.hurt = "no"; });
   // 8: place-only match -> records confirm
-  seedReport(s, "sofia", "riverside", "E2", 26, (i) => { i.condition = "fine"; i.records = "placeOnly"; i.number = undefined; });
+  seedReport(s, "alex", "riverside", "E2", 26, (i) => { i.condition = "fine"; i.records = "placeOnly"; i.number = undefined; });
   // 9: key customer other brand
-  seedReport(s, "mia", "techpark", "C12", 4, (i) => { i.condition = "fine"; i.units = 4; });
+  seedReport(s, "tom", "techpark", "C12", 4, (i) => { i.condition = "fine"; i.units = 4; });
   // 10: two leads from one photo
-  seedReport(s, "sofia", "riverside", "B12", 6, (i) => { i.condition = "minor"; i.age = 26; });
+  seedReport(s, "alex", "riverside", "B12", 6, (i) => { i.condition = "minor"; i.age = 26; });
   // 11: declined lead -> manager list
-  const r11 = seedReport(s, "mia", "citymall", "C1", 20, (i) => { i.condition = "fine"; });
+  const r11 = seedReport(s, "tom", "citymall", "C1", 20, (i) => { i.condition = "fine"; });
   const l11 = r11.items.find((x) => x.kind === "lead")!; A.decline(s, l11.id, "elias", "Wrong area");
   // 12: old photo, points held
-  seedReport(s, "mia", "riverside", "E10", 9, (i) => { i.condition = "fine"; });
+  seedReport(s, "tom", "riverside", "E10", 9, (i) => { i.condition = "fine"; });
   // 13: records fix + proposed merge waiting for manager
-  const r13 = seedReport(s, "sofia", "techpark", "B17", 10, (i) => { i.condition = "fine"; });
+  const r13 = seedReport(s, "alex", "techpark", "B17", 10, (i) => { i.condition = "fine"; });
   A.records(s, r13.items.find((x) => x.kind === "records")!.id, "priya", "merge");
   s.clock = 0; adv(0); tick(s);
   s.alerts.forEach((a) => { if (a.t < Date.now() - 4 * H) a.read = true; });
@@ -430,10 +430,10 @@ export function seed(): State {
 
 /* ---------- context ---------- */
 interface Ctx {
-  s: State; ready: boolean; me: ReturnType<typeof userOf>; now: number;
+  app: AppId; s: State; ready: boolean; me: ReturnType<typeof userOf>; now: number;
   mutate: (fn: (s: State) => void) => void;
-  login: (id: string | null) => void; reset: () => void;
-  setOffline: (b: boolean) => void; advance: (h: number) => void;
+  login: (id: string) => void; reset: () => void;
+  setOffline: (b: boolean) => void;
 }
 const C = createContext<Ctx | null>(null);
 export const useApp = () => { const c = useContext(C); if (!c) throw new Error("no store"); return c; };
@@ -445,7 +445,10 @@ const api = {
 };
 const mineOf = (st: State, prev: State | null): State => ({ ...st, userId: prev?.userId ?? null, offline: prev?.offline ?? false });
 
-export function Provider({ children }: { children: ReactNode }) {
+const inApp = (app: AppId, id: string | null | undefined) => APPS[app].users.some((u) => u.id === id);
+
+/** Each app keeps its own signed-in user, so SHERPA and Snap & Lead never sign each other out in the same browser. */
+export function Provider({ app, children }: { app: AppId; children: ReactNode }) {
   const [s, setS] = useState<State | null>(null);
   const saveT = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rev = useRef(0); const dirty = useRef(false); const lv = useRef(0);
@@ -462,11 +465,13 @@ export function Provider({ children }: { children: ReactNode }) {
       if (remote?.state && remote.state.v === STATE_VERSION) { init = remote.state; rev.current = remote.rev; }
       if (!init) { try { const raw = localStorage.getItem(KEY); if (raw) { const j = JSON.parse(raw) as State; if (j.v === STATE_VERSION) init = j; } } catch { /* ignore */ } }
       const st = init ?? seed();
-      try { st.userId = localStorage.getItem(USER_KEY); } catch { st.userId = null; }
+      let saved: string | null = null;
+      try { saved = localStorage.getItem(USER_KEY[app]); } catch { /* ignore */ }
+      st.userId = inApp(app, saved) ? saved : APPS[app].home;
       if (!dead) setS(st);
     })();
     return () => { dead = true; };
-  }, []);
+  }, [app]);
   /* save: this browser's cache at once, the server after a short pause */
   useEffect(() => {
     if (!s) return;
@@ -500,13 +505,16 @@ export function Provider({ children }: { children: ReactNode }) {
   const mutate = useCallback((fn: (st: State) => void) => {
     setS((p) => { if (!p) return p; const n = structuredClone(p); fn(n); tick(n); return n; });
   }, []);
-  const login = useCallback((id: string | null) => { try { if (id) localStorage.setItem(USER_KEY, id); else localStorage.removeItem(USER_KEY); } catch { /* ignore */ } setS((p) => (p ? { ...p, userId: id } : p)); }, []);
+  const login = useCallback((id: string) => {
+    if (!inApp(app, id)) return;
+    try { localStorage.setItem(USER_KEY[app], id); } catch { /* ignore */ }
+    setS((p) => (p ? { ...p, userId: id } : p));
+  }, [app]);
   const reset = useCallback(() => { setS((p) => { const n = seed(); n.userId = p?.userId ?? null; return n; }); }, []);
   const setOffline = useCallback((b: boolean) => mutate((st) => { st.offline = b; if (!b) A.sync(st); }), [mutate]);
-  const advance = useCallback((h: number) => mutate((st) => { st.clock += h * H; }), [mutate]);
 
-  const value = useMemo<Ctx | null>(() => s ? ({ s, ready: true, me: userOf(s.userId), now: nowOf(s), mutate, login, reset, setOffline, advance }) : null, [s, mutate, login, reset, setOffline, advance]);
-  if (!value) return <div className="grid h-screen place-items-center text-sm text-muted">Loading SHERPA…</div>;
+  const value = useMemo<Ctx | null>(() => s ? ({ app, s, ready: true, me: userOf(s.userId), now: nowOf(s), mutate, login, reset, setOffline }) : null, [app, s, mutate, login, reset, setOffline]);
+  if (!value) return <div className="grid h-screen place-items-center text-sm text-muted">Loading {APPS[app].name}…</div>;
   return <C.Provider value={value}>{children}</C.Provider>;
 }
 

@@ -1,4 +1,5 @@
 "use client";
+import { StreamText, Thinking, streamMs, thinkMs } from "../Stream";
 import { useEffect, useRef, useState } from "react";
 import { useApp, userOf } from "@/lib/store";
 import {
@@ -31,12 +32,12 @@ type Part =
   | { k: "oppstatus"; id: string };
 type Msg = Part & { mid: number };
 export interface Seed { id: number; card: NbaCard }
-interface Ops { snap: () => void; card: (c: NbaCard) => void; open: (id: string) => void; opp: (id: string) => void; pick: (id: string, v: { term: number; disc: number }) => void; send: (id: string, e: { subject: string; body: string }, chase: boolean) => void; ask: (t: string) => void; go: (v: string) => void }
+interface Ops { card: (c: NbaCard) => void; open: (id: string) => void; opp: (id: string) => void; pick: (id: string, v: { term: number; disc: number }) => void; send: (id: string, e: { subject: string; body: string }, chase: boolean) => void; ask: (t: string) => void; go: (v: string) => void }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PRODUCT_WORDS: [RegExp, ProductKey][] = [[/moderni/i, "modernisation"], [/repair/i, "repair"], [/maintenance|take over|competitor/i, "maintenance"], [/renew/i, "renewal"]];
 
-export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, onSnap, noDash, go }: { seed: Seed | null; onSnap?: () => void; noDash?: boolean; onOpenOffer: (id: string) => void; onOpenOpp: (id: string) => void; onOpenLead: (reportId: string) => void; go: (v: string) => void }) {
+export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }: { seed: Seed | null; noDash?: boolean; onOpenOffer: (id: string) => void; onOpenOpp: (id: string) => void; onOpenLead: (reportId: string) => void; go: (v: string) => void }) {
   const { s, me, mutate } = useApp();
   const app = useRef({ s, me, mutate });
   useEffect(() => { app.current = { s, me, mutate }; });
@@ -57,9 +58,12 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, onSnap, noDas
   async function bot(parts: (string | Part)[], cs: Chip[] = [], st = "idle") {
     setChips([]); setBusy(true); stage.current = "busy";
     for (const p of parts) {
-      setTyping(true); await sleep(typeof p === "string" ? Math.min(800, 300 + p.length * 4) : 420);
+      setTyping(true); await sleep(typeof p === "string" ? thinkMs(p) : 500);
       if (!alive.current) return;
       setTyping(false); push(typeof p === "string" ? say(p) : p);
+      const t = typeof p === "string" ? p : p.k === "text" && p.from === "bot" ? p.text : "";
+      if (t) await sleep(streamMs(t));
+      if (!alive.current) return;
     }
     stage.current = st; setChips(cs); setBusy(false);
   }
@@ -308,7 +312,6 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, onSnap, noDas
   const ops: Ops = {
     open: onOpenOffer, opp: onOpenOpp,
     go,
-    snap: () => onSnap?.(),
     card: (c) => { if (busyRef.current) return; runCard(c); },
     ask: (t) => { if (busyRef.current) return; setChips([]); if (!echoed.current) push({ k: "text", from: "me", text: t }); handle(t); },
     pick: (id, v) => { app.current.mutate((st) => SH.setTerms(st, id, me_().id, { term: v.term, discountPct: v.disc })); },
@@ -357,13 +360,12 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, onSnap, noDas
     <div className="absolute inset-0 flex flex-col bg-surface">
       <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="mx-auto w-full max-w-3xl space-y-3.5 px-3 py-5 @3xl:px-4">
         {msgs.map((m) => <Bubble key={m.mid} m={m} ops={ops} />)}
-        {typing && <div className="flex items-center"><div className="sheet flex gap-1 px-3.5 py-3"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:240ms]" /></div></div>}
-        {chips.length > 0 && !busy && <div className="pop flex flex-wrap gap-2 pt-1">{chips.map((c, k) => <button key={k} onClick={() => onChip(c)} className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-[13px] font-medium transition hover:bg-surface ${c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : "border-line bg-white"}`}>{c.icon && <Icon n={c.icon} s={14} />}{c.label}</button>)}</div>}
+        {typing && <Thinking />}
+        {chips.length > 0 && !busy && <div className="pop flex flex-wrap gap-2 pt-1">{chips.map((c, k) => <button key={k} onClick={() => onChip(c)} className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-[13px] font-medium transition ${c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : "border-line bg-white hover:bg-surface"}`}>{c.icon && <Icon n={c.icon} s={14} />}{c.label}</button>)}</div>}
       </div></div>
       <div className="shrink-0 bg-surface"><div className="mx-auto w-full max-w-3xl px-3 pb-2 pt-2.5">
         <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-lg border border-brand/60 bg-white p-1.5 focus-within:border-brand">
-          <input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "SHERPA is working…" : "Ask anything, or add a photo of a lift…"} className="min-h-10 min-w-0 flex-1 bg-transparent px-2.5 text-[14px] outline-none placeholder:text-muted disabled:opacity-60" />
-          {onSnap && <button type="button" aria-label="Snap a lift" onClick={onSnap} className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-ink/70 hover:bg-surface"><Icon n="camera" s={19} /></button>}
+          <input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "SHERPA is working…" : "Ask anything…"} className="min-h-10 min-w-0 flex-1 bg-transparent px-2.5 text-[14px] outline-none placeholder:text-muted disabled:opacity-60" />
           <button type="submit" aria-label="Send" disabled={busy || !text.trim()} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-brand text-white disabled:opacity-35"><Icon n="send" s={17} /></button>
         </form>
         <div className="mt-1.5 hidden text-center text-[11.5px] text-muted @xl:block">SHERPA · Simulated agents, mock NewCRM data · Nothing is sent without your confirmation</div>
@@ -378,7 +380,7 @@ function Bubble({ m, ops }: { m: Msg; ops: Ops }) {
     if (m.from === "me") return <div className="pop flex justify-end"><div className="max-w-[80%] rounded-lg bg-brand px-4 py-2.5 text-[14px] leading-[21px] text-white">{m.text}</div></div>;
     return (
       <div className="pop"><div>
-        <div className="sheet whitespace-pre-wrap break-words px-4 py-3 text-[14px] leading-[21px]">{m.text}</div>
+        <div className="sheet whitespace-pre-wrap break-words px-4 py-3 text-[14px] leading-[21px]"><StreamText text={m.text} /></div>
         {m.why && <details className="group mt-1 px-1 text-[12px] text-muted"><summary className="cursor-pointer list-none font-medium hover:text-ink [&::-webkit-details-marker]:hidden"><span className="inline-block transition group-open:rotate-90">›</span> Why this answer</summary><ul className="mt-1 list-disc space-y-0.5 pl-5">{m.why.map((w, k) => <li key={k}>{w}</li>)}</ul></details>}
       </div></div>
     );
