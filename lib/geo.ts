@@ -1,5 +1,5 @@
 import { PLACES } from "./data";
-import { isOpen, oppOf, KIND_LABEL } from "./sherpa";
+import { isOpen, oppOf, KIND_LABEL, NAMES } from "./sherpa";
 import type { Opp, State } from "./types";
 
 /** The three things a seller wants to see on one map. */
@@ -55,7 +55,7 @@ export function buildPins(s: State, meId: string, mineIds: Set<string>, now: num
     out.push({
       id: o.id, layer: "lead", name: o.placeName, sub: `${KIND_LABEL[o.kind]} · ${o.id}`, area: o.area, ...at, oppId: o.id, accountId: o.accountId, mine: mineIds.has(o.id), hot: early,
       key: !!s.sherpa.accounts.find((a) => a.id === o.accountId)?.key,
-      facts: [["Opportunity", o.id], ["Stage", o.stage[0].toUpperCase() + o.stage.slice(1)], ["Value", o.value ? `₹${(o.value / 1e5).toFixed(1)} L` : "Not priced yet"], ["Source", o.source.label]],
+      facts: [["Opportunity", o.id], ["Stage", o.stage[0].toUpperCase() + o.stage.slice(1)], ["Value", o.value ? `₹${(o.value / 1e5).toFixed(1)} L` : "Not priced yet"], ["Owner", NAMES[o.owner] ?? o.owner], ["Source", o.source.label]],
       why: ({ new: "New lead: waiting to be accepted", contact: "Accepted: needs a first contact", visit: "Site visit to plan", qualify: "Ready to qualify", bid: "Bid being prepared", offer: "Offer being prepared", sent: "Offer sent: waiting for the customer" } as Record<string, string>)[o.stage] ?? "In progress",
     });
   }

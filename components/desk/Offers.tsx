@@ -1,11 +1,12 @@
 "use client";
 import { useState } from "react";
 import { A, useApp, userOf } from "@/lib/store";
-import { AREA_NAME, GUIDE, NAMES, PRODUCT, SH, aboveLimit, accountOf, approversFor, assetOf, chaseEmail, chf, emailFor, perYear, regionRef, winChance } from "@/lib/sherpa";
+import { AREA_NAME, GUIDE, NAMES, PRODUCT, SH, oppOf, tenderOf, aboveLimit, accountOf, approversFor, assetOf, chaseEmail, chf, emailFor, perYear, regionRef, winChance } from "@/lib/sherpa";
 import type { Offer } from "@/lib/types";
 import { Btn, Card, Empty, Field, Icon, Pill } from "../ui";
 import { Back, Label } from "./Action";
 import { Page } from "./Common";
+import { PastQuotes } from "./Bid";
 
 const ST: Record<Offer["status"], [string, "gray" | "red" | "green" | "amber" | "blue"]> = {
   draft: ["Draft", "gray"], awaiting: ["Awaiting approval", "amber"], changes: ["Changes asked", "red"], approved: ["Approved", "green"],
@@ -110,6 +111,9 @@ export function OfferPage({ id, onBack }: { id: string; onBack: () => void }) {
   const blocked = aboveLimit(o.discountPct);
   const draftMail = () => setMail(emailFor(s, o, me!.name));
   const done = ["won", "lost", "rejected"].includes(o.status);
+  /* a bid covers many lifts, earlier prices are per lift: compare like with like */
+  const lifts = o.product === "newinstall" ? (tenderOf(s, oppOf(s, o.oppId)?.tenderId)?.lifts ?? 1) : 1;
+  const unit = { ...o, price: o.price / lifts };
 
   // the one recommended step for this person right now
   let step: { title: string; why: string; body?: React.ReactNode } | null = null;
@@ -178,7 +182,8 @@ export function OfferPage({ id, onBack }: { id: string; onBack: () => void }) {
               </div>
             )}
           </Card>
-          <Card className="p-5"><Label>Price check for {AREA_NAME[o.area]}</Label><RegionCard o={o} /></Card>
+          <Card className="p-5"><Label>Price check for {AREA_NAME[o.area]}</Label><RegionCard o={unit} /></Card>
+          <Card className="p-5"><Label>Earlier quotes of this kind</Label><PastQuotes area={o.area} product={o.product} price={perYear(unit)} discountPct={o.discountPct} /></Card>
         </div>
         <div className="space-y-5 @4xl:sticky @4xl:top-4">
           {(o.status === "awaiting" || myStep) && (

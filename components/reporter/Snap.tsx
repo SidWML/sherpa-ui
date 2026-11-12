@@ -453,7 +453,7 @@ export function Snap({ preset, onExit, onOpen }: { preset?: Preset | null; onExi
       {/* SAFETY SHEET */}
       {safety && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 @3xl:items-center" onClick={() => setSafety(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="pop w-full max-w-md rounded-t-3xl bg-white p-5 @3xl:rounded-3xl">
+          <div onClick={(e) => e.stopPropagation()} className="pop w-full max-w-md rounded-t-3xl bg-white p-5 pb-[calc(1.25rem+var(--safe-bottom,0px))] @3xl:rounded-3xl @3xl:pb-5">
             <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-full bg-red-50 text-red-700"><Icon n="shield" s={22} /></div><div><div className="text-lg font-semibold">Thank you for speaking up</div><div className="text-sm text-muted">I will alert the emergency desk right away. No sales lead is created.</div></div></div>
             <div className="mt-4 text-sm font-semibold">Is anyone trapped or hurt?</div>
             <div className="mt-2 grid grid-cols-3 gap-2">{[["yes", "Yes"], ["no", "No"], ["unsure", "Not sure"]].map(([v, t]) => <button key={v} onClick={() => sendUnsafe(v as "yes")} className="rounded-xl border-2 border-red-200 py-3 text-sm font-bold text-red-800 hover:bg-red-50">{t}</button>)}</div>

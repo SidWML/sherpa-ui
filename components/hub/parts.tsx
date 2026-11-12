@@ -3,7 +3,7 @@ import { useApp } from "@/lib/store";
 import { gameOf } from "@/lib/game";
 import { NAMES, STAGES, computeNbas, daysTo, inr, isOpen, oppOf, tasksOfOpp, DAY, SH, type NbaCard } from "@/lib/sherpa";
 import type { Opp, State } from "@/lib/types";
-import { Bot, Btn, Icon, Pill } from "../ui";
+import { Btn, Icon, Pill } from "../ui";
 
 /** Opportunities a person is part of. The manager sees the whole team. */
 export function involvedOpps(s: State, id: string, role: string) {
@@ -115,7 +115,7 @@ export function Insights({ go }: { go: (v: string) => void }) {
       </div>
       <div>
         <div className="mb-1.5 t-label">Pipeline by stage</div>
-        {byStage.length === 0 ? <div className="text-[13px] text-muted">Nothing open yet. Snap a lift to start.</div> : <div className="space-y-1.5">{byStage.map(([l, n]) => <div key={l} className="flex items-center gap-2 text-[12.5px]"><span className="w-14 shrink-0 text-muted">{l}</span><div className="h-2 flex-1 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-brand" style={{ width: `${(n / max) * 100}%` }} /></div><b className="num w-4 text-right">{n}</b></div>)}</div>}
+        {byStage.length === 0 ? <div className="text-[13px] text-muted">Nothing open yet.</div> : <div className="space-y-1.5">{byStage.map(([l, n]) => <div key={l} className="flex items-center gap-2 text-[12.5px]"><span className="w-14 shrink-0 text-muted">{l}</span><div className="h-2 flex-1 overflow-hidden rounded-full bg-surface"><div className="h-full rounded-full bg-brand" style={{ width: `${(n / max) * 100}%` }} /></div><b className="num w-4 text-right">{n}</b></div>)}</div>}
       </div>
       {stuck.length > 0 && <div>
         <div className="mb-1.5 t-label">Running late</div>
@@ -125,19 +125,3 @@ export function Insights({ go }: { go: (v: string) => void }) {
   );
 }
 
-/** First thing in the chat: the photo-to-lead entry. */
-export function SnapHero({ onSnap }: { onSnap: () => void }) {
-  return (
-    <div className="sheet overflow-hidden">
-      <div className="bg-gradient-to-b from-brand-soft to-white px-5 pb-5 pt-6 text-center">
-        <div className="flex justify-center"><Bot size={72} /></div>
-        <h2 className="t-display mx-auto mt-4 max-w-sm">Spot a lift? Let&apos;s turn it into an <span className="text-brand">opportunity.</span></h2>
-        <p className="t-body mx-auto mt-2 max-w-sm text-muted">Upload photos of the lift, and I&apos;ll read the details and ask a few quick questions.</p>
-        <div className="mx-auto mt-4 grid max-w-sm grid-cols-3 gap-2 text-[12px] text-muted">
-          {[["camera", "Up to 6 photos"], ["bolt", "AI reads the details"], ["flag", "Creates the right lead"]].map(([i, t]) => <div key={t} className="flex flex-col items-center gap-1.5"><span className="grid h-10 w-10 place-items-center rounded-full bg-white text-brand ring-1 ring-line"><Icon n={i} s={18} /></span>{t}</div>)}
-        </div>
-        <button onClick={onSnap} className="mx-auto mt-5 inline-flex min-h-11 w-full max-w-sm items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"><Icon n="camera" s={17} /> Take or upload photos</button>
-      </div>
-    </div>
-  );
-}

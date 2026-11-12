@@ -1,4 +1,6 @@
 "use client";
+import { StreamText, Thinking, streamMs, thinkMs } from "../Stream";
+import { getThread, saveThread } from "@/lib/chats";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { AREAS, GROUPS, PLACES, PRESETS, TEAM_NAME, TRACKS } from "@/lib/data";
 import { evaluate, presetToInput, teamsOf } from "@/lib/engine";
@@ -8,7 +10,7 @@ import { readPhotos, type Reading } from "@/lib/reader";
 import { levelOf } from "../Shell";
 import { Card, Icon, PhotoTile, Pill, Track } from "../ui";
 import { reportStatus } from "./status";
-import { SnapHero } from "../hub/parts";
+import { SnapHero } from "./SnapHero";
 
 /* ------------------------------------------------------------------ types */
 interface Sel { id: string; name: string; area: string; type: Place["type"]; key?: string; isNew?: boolean }
@@ -16,7 +18,7 @@ interface Chip { label: string; run: () => void; tone?: "red" | "green" | "soft"
 type TrackItem = ComponentProps<typeof Track>["item"];
 type Part =
   | { k: "text"; from: "bot" | "me"; text: string; photos?: Photo[] }
-  | { k: "reading"; rows: [string, string, number][]; note?: string; ask?: string }
+  | { k: "reading"; rows: [string, string, number][]; note?: string; ask?: string; photos?: Photo[]; place?: string }
   | { k: "form"; intro: string; fields: FField[]; initial: Record<string, string> }
   | { k: "summary"; place: string; headline: string; plain: string[]; who: string; intro?: string; tracks: TrackItem[]; points: { label: string; pts: number; status: string }[]; photos: Photo[]; offline: boolean; more: boolean; held: boolean }
   | { k: "report"; id: string; intro?: string; outro?: string }
@@ -25,7 +27,9 @@ type Part =
   | { k: "needs"; id: string; retake: boolean }
   | { k: "stage" }
   | { k: "hero" };
-type Msg = Part & { mid: number };
+type Msg = Part & { mid: number; t?: number; old?: boolean };
+const LIVE_ONLY = new Set(["stage", "hero", "form"]);
+const slim = (p: Photo) => (p.url && p.url.length > 60000 ? { ...p, url: undefined } : p);
 
 const EQ: Record<Equip, string> = { lift: "Lift / elevator", escalator: "Escalator", walk: "Moving walk" };
 const word = (e: Equip) => (e === "lift" ? "lift" : e === "escalator" ? "escalator" : "moving walk");
@@ -167,12 +171,13 @@ const fresh = () => ({
   ov: {} as Partial<Input>, sample: "", rd: null as Reading | null, corrections: [] as string[], extras: {} as { contact?: string; note?: string }, hints: {} as Hints, typed: { name: "", addr: "" },
 });
 
-export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: Preset | null; onOpen: (id: string) => void; onNew: () => void; onBack?: () => void; direct?: boolean }) {
+export function Assistant({ preset, onOpen, onNew, restore }: { preset?: Preset | null; onOpen: (id: string) => void; onNew: () => void; restore?: string }) {
   const { s, me, mutate, setOffline } = useApp();
   const ctx = useRef({ s, me, mutate, setOffline, onOpen });
   useEffect(() => { ctx.current = { s, me, mutate, setOffline, onOpen }; });
   const D = useRef(fresh());
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [tid] = useState(() => restore ?? `home-${Date.now()}`);
+  const [msgs, setMsgs] = useState<Msg[]>(() => (restore && me ? ((getThread(me.id, restore)?.msgs ?? []) as Msg[]).map((m, k) => ({ ...m, mid: k + 1, old: true })) : []));
   const [chips, setChips] = useState<Chip[]>([]);
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -182,7 +187,7 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   const [sheet, setSheet] = useState(false);
   const [staged, setStaged] = useState<Photo[]>([]);
   const stagedRef = useRef<Photo[]>([]); const hasStage = useRef(false); const formKeys = useRef<string[]>([]);
-  const idc = useRef(0);
+  const idc = useRef(msgs.length);
   const alive = useRef(true);
   const started = useRef(false);
   const box = useRef<HTMLDivElement>(null);
@@ -195,17 +200,19 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   const demoStep = useRef<Record<string, number>>({});
 
   const setStage = (x: string) => { stageRef.current = x; setStageS(x); };
-  const push = (p: Part) => setMsgs((m) => [...m, { ...p, mid: ++idc.current } as Msg]);
+  const push = (p: Part) => setMsgs((m) => [...m, { ...p, mid: ++idc.current, t: Date.now() } as Msg]);
   const userSays = (t: string, photos?: Photo[]) => { setMsgs((m) => m.filter((x) => x.k !== "hero")); push({ k: "text", from: "me", text: t, photos }); };
 
   async function bot(parts: (string | Part)[], cs: Chip[] = [], next = "idle") {
     setChips([]); setStage("busy"); setBusy(true);
     for (const p of parts) {
       setTyping(true);
-      await sleep(typeof p === "string" ? Math.min(900, 350 + p.length * 5) : 450);
+      await sleep(typeof p === "string" ? thinkMs(p) : 500);
       if (!alive.current) return;
       setTyping(false);
       push(typeof p === "string" ? { k: "text", from: "bot", text: p } : p);
+      if (typeof p === "string") await sleep(streamMs(p));
+      if (!alive.current) return;
     }
     setStage(next); setChips(cs); setBusy(false);
   }
@@ -259,7 +266,7 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   async function greet() {
     const name = ctx.current.me?.name.split(" ")[0] ?? "there";
     const needs = mineReports().filter((r) => reportStatus(r).grp === "needs");
-    void name; const parts: (string | Part)[] = [direct ? { k: "stage" } : { k: "hero" }]; hasStage.current = !!direct;
+    void name; const parts: (string | Part)[] = [{ k: "hero" }]; hasStage.current = false;
     const cs = idleChips().filter((c) => c.label !== "Add photos");
     if (needs.length) {
       needs.slice(0, 2).forEach((r) => { needsShown.current.add(r.id); tracked.current.add(r.id); });
@@ -390,7 +397,7 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
     if (i.quality === "notLift") return void bot(["That photo does not look like a lift or an escalator. Please retake it. There are no points for this one."], [{ label: "Retake photos", tone: "green", quiet: true, run: () => { d.photos = []; fileRef.current?.click(); } }, { label: "Try sample photos", quiet: true, run: () => sampleMenu() }], "idle");
     if (i.quality === "duplicatePhoto") return void bot(["I have seen this exact photo before, so I cannot count it again. Try a new photo."], [{ label: "Choose another photo", tone: "green", quiet: true, run: () => { d.photos = []; fileRef.current?.click(); } }], "idle");
     if (i.quality === "unreadable" && i.subject === "unit") return noBrandGuide();
-    await bot([{ k: "reading", rows: readRows(i), note: i.subject === "unit" && !i.number ? "I could not find the unit number. You can type it in the next step." : undefined, ask: "Is this correct?" }], [
+    await bot([{ k: "reading", photos: d.photos.slice(0, 2), place: placeNow().name, rows: readRows(i), note: i.subject === "unit" && !i.number ? "I could not find the unit number. You can type it in the next step." : undefined, ask: "Is this correct?" }], [
       { label: "Yes, looks right", tone: "green", icon: "check", run: () => void startQuestions() },
       { label: "Let me fix something", icon: "edit", run: fixMenu }], "confirmRead");
   }
@@ -703,45 +710,56 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
   useEffect(() => {
     alive.current = true;
     ctx.current.s.alerts.forEach((a) => seenAlerts.current.add(a.id));
-    const t = setTimeout(() => { if (started.current) return; started.current = true; if (preset) void loadScenario(preset, true); else void greet(); }, 0);
+    const t = setTimeout(() => {
+      if (started.current) return; started.current = true;
+      if (restore) { setStage("idle"); setChips(idleChips()); setBusy(false); return; }
+      if (preset) void loadScenario(preset, true); else void greet();
+    }, 0);
     return () => { alive.current = false; clearTimeout(t); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!me || msgs.every((m) => m.old) || !msgs.some((m) => m.k === "text" && m.from === "me")) return;
+    const texts = msgs.filter((m): m is Msg & { k: "text" } => m.k === "text");
+    const first = texts.find((m) => m.from === "me")!; const last = texts[texts.length - 1];
+    saveThread(me.id, {
+      id: tid, kind: "home", title: first.text.length > 48 ? `${first.text.slice(0, 47)}…` : first.text, last: `${last.from === "me" ? "You: " : ""}${last.text}`, t: Date.now(),
+      msgs: msgs.filter((m) => !LIVE_ONLY.has(m.k)).map((x) => ({ ...x, old: undefined })).map((m) => (m.k === "text" && m.photos ? { ...m, photos: m.photos.map(slim) } : m.k === "summary" ? { ...m, photos: m.photos.map(slim) } : m)),
+    });
+  }, [msgs, me]);
 
   const onChip = (c: Chip) => { if (busy) return; setChips([]); if (!c.quiet) userSays(c.label); c.run(); };
   const placeholder = stage === "typeNumber" || stage === "typeNumber2" || stage === "fixNumber" ? "Type the unit number…" : stage === "fixDev" ? "Developer or contractor name…" : stage === "typeBrand" ? "Brand and number, e.g. Schindler 74821…" : stage === "typeAddress" ? "Building name, address…" : stage === "searchPlace" || stage === "place" ? "Search for a building…" : stage === "optContact" ? "Name and role, or skip…" : stage === "optNote" ? "Add a note, or skip…" : "Ask anything or describe what you saw…";
 
   return (
-    <div className="absolute inset-0 flex flex-col bg-surface">
-      {onBack && (
-        <div className="shrink-0 border-b border-line bg-white"><div className="mx-auto grid w-full max-w-3xl grid-cols-[auto_1fr_auto] items-center gap-2 px-3 py-2">
-          <button onClick={onBack} aria-label="Back" className="grid h-9 w-9 place-items-center rounded-md border border-line text-ink/70 hover:bg-surface"><Icon n="back" s={16} /></button>
-          <div className="text-center text-[15px] font-semibold">Snap &amp; Lead</div>
-          <button onClick={onNew} aria-label="New chat" title="New chat" className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line text-muted hover:bg-surface"><Icon n="plus" s={15} /></button>
-        </div></div>
-      )}
+    <div className="absolute inset-0 flex flex-col bg-white">
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+          <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-5">
+            {msgs.map((m) => <Bubble key={m.mid} m={m} onOpen={onOpen} onNeeds={(t) => { userSays(t); }} stage={{ photos: staged, add: () => fileRef.current?.click(), remove: removeStaged, analyse: () => void analyseStaged(), begin: beginStage, form: finishForm, busy }} />)}
+            {typing && <div className="flex items-center gap-3"><Avatar /><Thinking /></div>}
+            {chips.length > 0 && !busy && (
+              <div className={`pop flex flex-wrap gap-2 ${msgs[msgs.length - 1]?.k === "hero" ? "" : "@xl:pl-11"}`}>
+                {chips.map((c, k) => (
+                  <button key={k} onClick={() => onChip(c)} className={`flex items-center gap-2 rounded-md border px-3.5 py-2.5 text-[13px] font-medium transition hover:bg-surface ${c.tone === "red" ? "border-brand/50 bg-white text-brand" : c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : c.tone === "soft" ? "border-dashed border-brand/50 bg-white text-brand" : "border-line bg-white"}`}>
+                    {c.icon && <Icon n={c.icon} s={15} />}{c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div></div>
 
-      <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="mx-auto w-full max-w-3xl space-y-3.5 px-3 py-5 @3xl:px-4">
-        {msgs.map((m) => <Bubble key={m.mid} m={m} onOpen={onOpen} onNeeds={(t) => { userSays(t); }} stage={{ photos: staged, add: () => fileRef.current?.click(), remove: removeStaged, analyse: () => void analyseStaged(), begin: beginStage, form: finishForm, busy }} />)}
-        {typing && <div className="flex items-center"><div className="sheet flex gap-1 px-3.5 py-3"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:240ms]" /></div></div>}
-        {chips.length > 0 && !busy && (
-          <div className="pop flex flex-wrap gap-2 pt-1">
-            {chips.map((c, k) => (
-              <button key={k} onClick={() => onChip(c)} className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-[13px] font-medium transition hover:bg-surface ${c.tone === "red" ? "border-brand/50 bg-white text-brand" : c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : c.tone === "soft" ? "border-dashed border-brand/50 bg-white text-brand" : "border-line bg-white"}`}>
-                {c.icon && <Icon n={c.icon} s={14} />}{c.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div></div>
-
-      <div className="shrink-0 bg-surface"><div className="mx-auto w-full max-w-3xl px-3 pb-2 pt-2.5">
-        <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-lg border border-brand/60 bg-white p-1.5 focus-within:border-brand">
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { const fl = Array.from(e.target.files ?? []); e.target.value = ""; if (fl.length) void onFiles(fl); }} />
-          <input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "Assistant is typing…" : placeholder} className="min-h-10 min-w-0 flex-1 bg-transparent px-2.5 text-[14px] outline-none placeholder:text-muted disabled:opacity-60" />
-          <button type="button" aria-label="Add photos" onClick={() => fileRef.current?.click()} disabled={busy} className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-ink/70 hover:bg-surface disabled:opacity-50"><Icon n="camera" s={19} /></button>
-          <button type="submit" aria-label="Send" disabled={busy || !text.trim()} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-brand text-white disabled:opacity-35"><Icon n="send" s={17} /></button>
-        </form>
-      </div></div>
+          <div className="shrink-0 border-t border-line bg-white"><div className="mx-auto w-full max-w-3xl px-3 pb-3 pt-2.5">
+            <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-lg border border-brand/60 bg-white p-1.5 focus-within:border-brand">
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={(e) => { const fl = Array.from(e.target.files ?? []); e.target.value = ""; if (fl.length) void onFiles(fl); }} />
+              <span className="grid h-9 w-9 shrink-0 place-items-center text-brand"><Icon n="sparkle" s={18} /></span>
+              <input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "Assistant is typing…" : placeholder} className="min-h-10 min-w-0 flex-1 bg-transparent px-1 text-[14px] outline-none placeholder:text-muted disabled:opacity-60" />
+              <button type="button" aria-label="Add photos" onClick={() => fileRef.current?.click()} disabled={busy} className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-ink/70 hover:bg-surface disabled:opacity-50"><Icon n="camera" s={19} /></button>
+              <button type="submit" aria-label="Send" disabled={busy || !text.trim()} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-brand text-white disabled:opacity-35"><Icon n="send" s={17} /></button>
+            </form>
+          </div></div>
+        </div>
+      </div>
 
       {sheet && (
         <div className="absolute inset-0 z-40 flex items-end bg-black/50" onClick={() => setSheet(false)}>
@@ -764,21 +782,39 @@ export function Assistant({ preset, onOpen, onNew, onBack, direct }: { preset?: 
 
 /* ----------------------------------------------------------- message views */
 interface StageApi { form: (v: Record<string, string>, typed: string, extras: { contact: string; note: string }) => void; photos: Photo[]; add: () => void; remove: (id: string) => void; analyse: () => void; begin: () => void; busy: boolean }
+const clock = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+function Avatar({ size = 32 }: { size?: number }) {
+  return <span className="grid shrink-0 place-items-center rounded-md bg-brand text-white" style={{ width: size, height: size }}><Icon n="camera" s={Math.round(size * 0.5)} /></span>;
+}
+const TRACK_TONE: Record<string, [string, string]> = { sales: ["#e3effb", "#1b5aa6"], project: ["#e3effb", "#1b5aa6"], renewal: ["#e2f4ea", "#1d7a45"], winback: ["#ece9fb", "#4b36b8"], modernisation: ["#fbe6f0", "#b02a66"], fault: ["#fde6e6", "#c02626"], emergency: ["#fde6e6", "#c02626"], info: ["#eeeef1", "#4a4a55"] };
+const READ_ICON: Record<string, string> = { Equipment: "layers", "Unit number": "list", Brand: "shield", "Service sticker": "doc", Capacity: "gear", "What I see": "pin", "Planned equipment": "layers", "The notice says": "doc" };
 function Bubble({ m, onOpen, onNeeds, stage }: { m: Msg; onOpen: (id: string) => void; onNeeds: (t: string) => void; stage: StageApi }) {
   const { s, me } = useApp();
+  const time = m.t ? <div className="mt-1 text-[11px] text-muted">{clock(m.t)}</div> : null;
   if (m.k === "text") {
     if (m.from === "me") return (
-      <div className="pop flex justify-end"><div className="max-w-[80%] rounded-lg bg-brand px-4 py-2.5 text-[14px] leading-[21px] text-white">
-        {m.photos && m.photos.length > 0 && <div className="mb-2 flex max-w-[17rem] flex-wrap justify-end gap-1.5">{m.photos.slice(0, 6).map((p) => <PhotoTile key={p.id} p={p} className="!h-24 !w-24 shrink-0 !rounded-md" />)}</div>}
-        <span className="whitespace-pre-wrap break-words">{m.text}</span></div></div>
+      <div className="pop flex justify-end">
+        <div className="flex min-w-0 max-w-[82%] flex-col items-end">
+          <div className="rounded-lg px-4 py-2.5 text-[14px] leading-[21px] text-ink" style={{ background: "#fde6e6" }}>
+            {m.photos && m.photos.length > 0 && <div className="mb-2 flex max-w-[17rem] flex-wrap justify-end gap-1.5">{m.photos.slice(0, 6).map((p) => <PhotoTile key={p.id} p={p} className="!h-24 !w-24 shrink-0 !rounded-md" />)}</div>}
+            <span className="whitespace-pre-wrap break-words">{m.text}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-[11px] text-muted">{m.t ? clock(m.t) : ""}<span className="text-brand"><Icon n="check" s={13} w={2.6} /></span></div>
+        </div>
+      </div>
     );
-    return <div className="pop"><div className="sheet whitespace-pre-wrap break-words px-4 py-3 text-[14px] leading-[21px]">{m.text}</div></div>;
+    return <div className="pop flex gap-3"><Avatar /><div className="min-w-0"><div className="inline-block max-w-full whitespace-pre-wrap break-words rounded-lg bg-surface px-4 py-2.5 text-[14px] leading-[21px]">{m.old ? m.text : <StreamText text={m.text} />}</div>{time}</div></div>;
   }
-  const wrap = (c: React.ReactNode) => <div className="pop min-w-0">{c}</div>;
-  if (m.k === "form") return wrap(<FormCard m={m} onDone={stage.form} />);
-  if (m.k === "hero") return wrap(<SnapHero onSnap={stage.begin} />);
+  const wrap = (c: React.ReactNode, flush = false) => <div className={`pop min-w-0 ${flush ? "" : "@xl:pl-11"}`}>{c}{!flush && time}</div>;
+  if (m.k === "form") return (
+    <div className="pop min-w-0">
+      <div className="flex gap-3"><Avatar /><div className="min-w-0"><div className="inline-block max-w-full rounded-lg bg-surface px-4 py-2.5 text-[14px] leading-[21px]">{m.intro}</div></div></div>
+      <div className="mt-3 @xl:pl-11"><FormCard m={m} onDone={stage.form} />{time}</div>
+    </div>
+  );
+  if (m.k === "hero") return wrap(<SnapHero onSnap={stage.begin} />, true);
   if (m.k === "stage") return wrap(
-    <div className="sheet p-4">
+    <div className="rounded-lg border border-line bg-white p-4">
       <div className="t-title">Add lift photos</div>
       <p className="t-small mt-1">Include clear photos such as the licence plate, button panel, service sticker or capacity plate. A building site or a notice works too.</p>
       <div className="mt-3 grid grid-cols-3 gap-2 @xl:grid-cols-4">
@@ -788,36 +824,71 @@ function Bubble({ m, onOpen, onNeeds, stage }: { m: Msg; onOpen: (id: string) =>
       <button onClick={stage.analyse} disabled={!stage.photos.length || stage.busy} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-40">Analyse photos <Icon n="sparkle" s={15} /></button>
     </div>);
   if (m.k === "reading") return wrap(
-    <Card className="p-3">
-      <div className="mb-1 flex items-center gap-2 text-sm font-semibold"><span className="grid h-6 w-6 place-items-center rounded-md bg-brand-soft text-brand"><Icon n="doc" s={14} /></span>Here&apos;s what I found</div>
-      {m.rows.map(([k, v, c]) => (
-        <div key={k} className="flex items-center justify-between gap-2 border-b border-line/70 py-1.5 text-[13px] last:border-0"><span className="text-muted">{k}</span>
-          <span className="flex items-center gap-1.5 text-right font-medium">{v}{c === 0 ? <Pill tone="amber">missing</Pill> : c < 70 ? <Pill tone="amber">please check</Pill> : <span className="text-emerald-600"><Icon n="check" s={15} w={2.5} /></span>}</span></div>
-      ))}
-      {m.note && <p className="mt-1.5 text-xs text-amber-800">{m.note}</p>}
-      {m.ask && <p className="mt-2 border-t border-line pt-2 text-[13.5px] font-medium">{m.ask}</p>}
-    </Card>);
-  if (m.k === "summary") return wrap(
-    <Card className="divide-y divide-line text-sm">
-      {m.intro && <p className="p-3 text-[13.5px]">{m.intro}</p>}
-      <div className="flex justify-between gap-3 p-3"><span className="text-muted">Place</span><span className="text-right font-medium">{m.place}</span></div>
-      <div className="flex justify-between gap-3 p-3"><span className="shrink-0 text-muted">What we found</span><div className="text-right"><b>{m.headline}</b>{m.plain.map((p, k) => <div key={k} className="text-xs font-normal text-muted">{p}</div>)}</div></div>
-      {m.photos.length > 0 && <div className="grid grid-cols-4 gap-2 p-3">{m.photos.map((p) => <PhotoTile key={p.id} p={p} />)}</div>}
-      <p className="p-3 text-[11.5px] text-muted">{m.offline ? "No signal: it will be saved on the phone and sent later. " : ""}Check the details. Once you create the lead, I show where it goes and how it progresses.</p>
-    </Card>);
+    <div className="overflow-hidden rounded-lg border border-line bg-white @xl:flex">
+      {m.photos && m.photos.length > 0 && <div className="grid grid-cols-2 gap-1.5 bg-surface p-2.5 @xl:w-[44%] @xl:shrink-0">{m.photos.map((p, k) => <div key={p.id} className="relative"><PhotoTile p={p} className="!h-36 !w-full !rounded-md" /><span className="absolute bottom-1.5 right-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold text-white">{k + 1}/{m.photos!.length}</span></div>)}</div>}
+      <div className="min-w-0 flex-1 p-4">
+        <div className="flex items-center gap-2 text-[15px] font-semibold"><span style={{ color: "#d9a300" }}><Icon n="sparkle" s={17} /></span>What I detected <span className="text-[12.5px] font-normal text-muted">(AI)</span></div>
+        <div className="mt-2">
+          {m.rows.map(([k, v, c]) => (
+            <div key={k} className="flex items-start gap-2.5 border-b border-line/70 py-2 text-[13px] last:border-0">
+              <span className="mt-0.5 text-muted"><Icon n={READ_ICON[k] ?? "pin"} s={15} /></span>
+              <span className="min-w-0 flex-1"><span className="block text-[12px] text-muted">{k}</span><span className="block font-medium leading-snug">{v}</span></span>
+              {c === 0 ? <Pill tone="amber">missing</Pill> : c < 70 ? <Pill tone="amber">please check</Pill> : null}
+            </div>
+          ))}
+        </div>
+        {m.note && <p className="mt-1.5 text-xs text-amber-800">{m.note}</p>}
+        <div className="mt-2 flex items-center gap-1.5 text-[13px]" style={{ color: "#1d7a45" }}><Icon n="check" s={14} w={2.6} />Photos are clear</div>
+        {m.ask && <div className="mt-2 border-t border-line pt-2.5 text-[13.5px] font-medium">{m.ask}</div>}
+      </div>
+    </div>);
+  if (m.k === "summary") {
+    const pts = m.points.filter((p) => p.status !== "reversed").reduce((x, p) => x + p.pts, 0);
+    return wrap(
+      <div className="overflow-hidden rounded-lg border border-line bg-white">
+        {m.intro && <p className="px-4 pb-1 pt-3.5 text-[13.5px] text-muted">{m.intro}</p>}
+        {m.photos[0] && <div className="relative mt-2"><PhotoTile p={m.photos[0]} className="!h-40 !w-full !rounded-none" />{m.photos.length > 1 && <span className="absolute right-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[11.5px] font-semibold text-white">{m.photos.length} photos</span>}</div>}
+        <div className="px-4 pt-4">
+          <div className="text-[18px] font-semibold leading-tight tracking-tight">{m.place}</div>
+          <div className="mt-1.5 flex items-start gap-1.5 text-[13px] text-muted"><span className="mt-0.5 shrink-0"><Icon n="pin" s={13} /></span><span>{m.headline}</span></div>
+          {m.tracks.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{m.tracks.map((t, k) => { const c = TRACK_TONE[t.track] ?? TRACK_TONE.info; return <span key={k} className="inline-flex items-center rounded-md px-2.5 py-1 text-[12px] font-semibold" style={{ background: c[0], color: c[1] }}>{TRACKS[t.track].label}</span>; })}</div>}
+        </div>
+        <div className="mx-4 mt-4 divide-y divide-line rounded-md border border-line">
+          {([["users", "Goes to", m.who], ["star", "You earn", pts > 0 ? "+" + pts + " points" : "No points"]] as const).map(([ic, k, v]) => (
+            <div key={k} className="flex items-center justify-between gap-4 px-3.5 py-3"><span className="flex shrink-0 items-center gap-2 text-[13px] text-muted"><Icon n={ic} s={14} />{k}</span><span className="text-right text-[14px] font-semibold">{v}</span></div>
+          ))}
+        </div>
+        {m.plain.length > 0 && <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-md p-3" style={{ background: "#fff4e5" }}><span className="mt-0.5 shrink-0" style={{ color: "#d9a300" }}><Icon n="sparkle" s={16} /></span><div><div className="text-[13px] font-semibold">AI insight</div>{m.plain.map((p, k) => <div key={k} className="mt-0.5 text-[13px] leading-snug">{p}</div>)}</div></div>}
+        <p className="px-4 pb-4 pt-3 text-[11.5px] text-muted">{m.offline ? "No signal: it will be saved on the phone and sent later. " : ""}Nothing is sent until you press Create lead.</p>
+      </div>);
+  }
   if (m.k === "report") {
     const r = s.reports.find((x) => x.id === m.id);
     if (!r) return wrap(<Card className="p-3 text-sm text-muted">Creating…</Card>);
     const st = reportStatus(r); const live = r.items.filter((i) => !i.silent);
+    const created = !!m.intro?.startsWith("Lead "); const std = !!m.outro?.startsWith("I will keep you posted");
+    const pts = r.points.filter((p) => p.status !== "reversed").reduce((x, p) => x + p.pts, 0);
     return wrap(
-      <Card className="p-3">
-        {m.intro && <p className="mb-3 border-b border-line pb-3 text-[13.5px]">{m.intro}</p>}
-        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate text-sm font-bold">{r.placeName}</div><div className="truncate text-[11px] text-muted">{r.id}{r.input.number ? ` · Lift No. ${r.input.number}` : ""}</div></div><Pill tone={st.tone}>{st.t}</Pill></div>
-        <div className="mt-1 text-[13px]">{r.headline}</div>
-        <div className="mt-3 space-y-3">{live.length ? live.slice(0, 2).map((it) => <Track key={it.id} item={it} />) : <Track item={{ track: r.status === "queued" ? "queued" : "info", step: 0, status: "new" }} />}</div>
-        <div className="mt-3 flex items-center justify-between border-t border-line pt-2 text-xs"><span className="text-muted">{r.points.filter((p) => p.status !== "reversed").reduce((a, p) => a + p.pts, 0)} points{r.impact ? " · 🎉 won" : ""}</span><button onClick={() => onOpen(r.id)} className="font-semibold text-brand">Full details →</button></div>
-        {m.outro && <p className="mt-3 border-t border-line pt-3 text-[12.5px] text-muted">{m.outro}</p>}
-      </Card>);
+      <div className="overflow-hidden rounded-lg border border-line bg-white">
+        <div className="flex items-center gap-3 px-4 py-3.5" style={{ background: "#e2f4ea" }}>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-white" style={{ background: "#2f855a" }}><Icon n="check" s={18} w={3} /></span>
+          <div className="min-w-0"><div className="text-[15px] font-semibold" style={{ color: "#17603a" }}>{created ? "Lead created" : "Saved"}</div><div className="truncate text-[12.5px]" style={{ color: "#1d7a45" }}>{created ? r.id : m.intro}</div></div>
+        </div>
+        <div className="flex items-start gap-3 p-4">
+          {r.photos[0] && <PhotoTile p={r.photos[0]} className="!h-14 !w-14 shrink-0 !rounded-md" />}
+          <div className="min-w-0 flex-1"><div className="line-clamp-2 text-[16px] font-semibold leading-tight">{r.placeName}</div><div className="mt-0.5 truncate text-[12.5px] text-muted">{r.input.number ? "Lift No. " + r.input.number + " · " : ""}{r.headline}</div></div>
+          </div>
+        <div className="px-4 pb-1"><Pill tone={st.tone}>{st.t}</Pill></div>
+        <div className="space-y-3 border-t border-line px-4 py-4">{live.length ? live.slice(0, 2).map((it) => <Track key={it.id} item={it} />) : <Track item={{ track: r.status === "queued" ? "queued" : "info", step: 0, status: "new" }} />}</div>
+        {std && (
+          <div className="border-t border-line px-4 py-4">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">How you earn</div>
+            <div className="grid grid-cols-3 gap-2">{([["Owner accepts", "+20"], ["Quote sent", "+50"], ["Deal won", "+200"]] as const).map(([k, v]) => <div key={k} className="rounded-md px-2.5 py-2" style={{ background: "#fdf0cf" }}><div className="num text-[15px] font-semibold" style={{ color: "#9a6a00" }}>{v}</div><div className="text-[12px] leading-tight" style={{ color: "#7a5500" }}>{k}</div></div>)}</div>
+          </div>
+        )}
+        {m.outro && !std && <p className="border-t border-line px-4 py-3 text-[12.5px] text-muted">{m.outro}</p>}
+        <div className="flex items-center justify-between border-t border-line px-4 py-3 text-[13px]"><span className="inline-flex items-center gap-1.5 text-muted"><span style={{ color: "#d9a300" }}><Icon n="star" s={14} /></span><b className="num text-ink">{pts}</b> points so far{r.impact ? " · won" : ""}</span><button onClick={() => onOpen(r.id)} className="font-semibold text-brand">Full details →</button></div>
+      </div>);
   }
   if (m.k === "points" && me) {
     const { confirmed, pending } = pointsOf(s, me.id); const lv = levelOf(confirmed);
@@ -825,7 +896,7 @@ function Bubble({ m, onOpen, onNeeds, stage }: { m: Msg; onOpen: (id: string) =>
       <Card className="p-3"><div className="flex items-end justify-between"><div><div className="text-xs text-muted">Confirmed points</div><div className="text-3xl font-bold">{confirmed}</div><div className="text-[11px] text-muted">+{pending} pending checks</div></div><div className="text-right"><Pill tone="red">{lv.name}</Pill><div className="mt-1 text-xs text-muted">{lv.next ? `${lv.next.from - confirmed} pts to ${lv.next.name}` : "Top level"}</div></div></div>
         <div className="mt-2 h-2 rounded-full bg-line"><div className="h-2 rounded-full bg-brand" style={{ width: `${lv.pct}%` }} /></div></Card>);
   }
-  if (m.k === "update") return wrap(<div className="flex items-start gap-2 rounded-2xl border border-brand/30 bg-brand-soft px-3 py-2 text-sm"><span className="mt-0.5 text-brand"><Icon n="bell" s={15} /></span><span><b className="text-[11px] uppercase tracking-wide text-brand">Update</b><br />{m.text}</span></div>);
+  if (m.k === "update") return wrap(<div className="flex items-start gap-2 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm"><span className="mt-0.5 text-brand"><Icon n="bell" s={15} /></span><span><b className="text-[11px] uppercase tracking-wide text-brand">Update</b><br />{m.text}</span></div>);
   if (m.k === "needs") return wrap(<NeedsCard id={m.id} retake={m.retake} onDone={onNeeds} />);
   return null;
 }
@@ -854,12 +925,11 @@ function FormCard({ m, onDone }: { m: Extract<Msg, { k: "form" }>; onDone: (v: R
   const ready = m.fields.filter((f) => f.req).every((f) => v[f.key]);
   const ico = (o: string) => (o === "fine" ? "check" : o === "minor" || o === "unsafe" ? "warn" : o === "out" ? "x" : "");
   return (
-    <div className="sheet p-4">
-      <p className="text-[14px]">{m.intro}</p>
-      <div className="mt-3 space-y-4">
-        {m.fields.filter((f) => !(f.key === "ordered" && (v.installer === "comp" || v.installer === "us"))).map((f) => (
-          <div key={f.key}>
-            <div className="mb-1.5 text-[13px] font-semibold">{f.label}{f.req && <span className="text-brand"> *</span>}</div>
+    <div className="rounded-lg border border-line bg-white p-4">
+      <div className="space-y-4">
+        {m.fields.filter((f) => !(f.key === "ordered" && (v.installer === "comp" || v.installer === "us"))).map((f, n) => (
+          <div key={f.key} className="border-b border-line pb-4 last:border-0 last:pb-0">
+            <div className="mb-2.5 flex items-center gap-2.5"><span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-brand text-[11px] font-semibold text-white">{n + 1}</span><span className="text-[14px] font-semibold">{f.label}{f.req && <span className="text-brand"> *</span>}</span></div>
             {f.text ? (
               <div className="flex flex-wrap items-center gap-2">
                 <input disabled={done} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type it, e.g. 74821" className="min-h-10 w-44 rounded-lg border border-line bg-white px-3 text-[14px] outline-none focus:border-brand disabled:bg-surface" />
@@ -882,7 +952,7 @@ function FormCard({ m, onDone }: { m: Extract<Msg, { k: "form" }>; onDone: (v: R
           <label className="block"><span className="mb-1 block text-[12px] text-muted">Note for the owner (optional, +5 points)</span><input disabled={done} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything useful" className="min-h-10 w-full rounded-lg border border-line bg-white px-3 text-[14px] outline-none focus:border-brand disabled:bg-surface" /></label>
         </div>
       </div>
-      <button type="button" disabled={!ready || done} onClick={() => { setDone(true); onDone(v, typed, { contact, note }); }} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-40">{done ? "Details saved" : ready ? "Review the lead" : "Answer the first question to continue"}</button>
+      <button type="button" disabled={!ready || done} onClick={() => { setDone(true); onDone(v, typed, { contact, note }); }} className="ml-auto mt-4 flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-40">{done ? "Details saved" : ready ? <>Review the lead <Icon n="chev" s={15} w={2.4} /></> : "Answer the first question to continue"}</button>
     </div>
   );
 }
