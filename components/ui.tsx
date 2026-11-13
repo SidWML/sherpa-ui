@@ -70,11 +70,11 @@ export function Avatar({ initials, tone = "brand" }: { initials: string; tone?: 
 type BtnProps = { children: ReactNode; onClick?: () => void; v?: "primary" | "ghost" | "soft" | "danger" | "dark"; disabled?: boolean; full?: boolean; sm?: boolean; className?: string; type?: "button" | "submit" };
 export function Btn({ children, onClick, v = "primary", disabled, full, sm, className = "", type = "button" }: BtnProps) {
   const tone = {
-    primary: { variant: "default", cls: "hover:bg-brand-dark" },
-    ghost: { variant: "outline", cls: "bg-white" },
-    soft: { variant: "secondary", cls: "bg-brand-soft text-brand hover:bg-red-100" },
-    danger: { variant: "destructive", cls: "bg-red-700 text-white hover:bg-red-800" },
-    dark: { variant: "default", cls: "bg-ink text-white hover:bg-black" },
+    primary: { variant: "default", cls: "border-brand bg-brand text-white hover:bg-brand-dark hover:border-brand-dark disabled:border-zinc-200 disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100" },
+    ghost: { variant: "outline", cls: "border-line bg-white text-ink hover:bg-surface hover:text-ink disabled:text-zinc-400 disabled:opacity-100" },
+    soft: { variant: "secondary", cls: "bg-brand-soft text-brand hover:bg-red-100 hover:text-brand-dark disabled:opacity-60" },
+    danger: { variant: "destructive", cls: "border-red-700 bg-red-700 text-white hover:bg-red-800 hover:text-white disabled:border-zinc-200 disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100" },
+    dark: { variant: "default", cls: "border-ink bg-ink text-white hover:bg-black hover:border-black disabled:border-zinc-200 disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100" },
   } as const;
   const t = tone[v];
   return <Button type={type} disabled={disabled} onClick={onClick} variant={t.variant} className={cn(sm ? "h-auto min-h-9 px-3 text-[13px]" : "h-auto min-h-11 gap-2 px-4 text-sm", t.cls, full && "w-full", className)}>{children}</Button>;

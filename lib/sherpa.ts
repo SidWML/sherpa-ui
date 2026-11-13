@@ -526,7 +526,7 @@ export const OP = {
   /** The order is created. This is the win. */
   createOrder(s: State, id: string, by: string, p: { number: string; delivery: number; payment: string }) {
     const o = oppOf(s, id); if (!o?.agreed) return;
-    const now = nowS(s); const of = offerOf(s, o.offerId); const acc = accountOf(s, o.accountId); const t = tenderOf(s, o.tenderId);
+    const now = nowS(s); const of = offerOf(s, o.offerId); const acc = accountForOpp(s, o); const t = tenderOf(s, o.tenderId);
     closeTasks(s, id, null);
     o.order = { ...p, by, at: now }; o.stage = "won"; o.closedAt = now; o.value = o.agreed.price;
     if (of) { of.status = "won"; of.price = o.agreed.price; log(s, of, by, `Order ${p.number} created. Won`); s.sherpa.past.push({ id: `p${s.sherpa.seq++}`, area: of.area, product: of.product, price: perYear(of), discountPct: of.discountPct, outcome: "won", at: now, customer: acc?.name ?? o.placeName }); }
@@ -555,6 +555,30 @@ export const OP = {
     o.job = { lead: by, start: p.start, siteContact: p.siteContact, acceptedAt: nowS(s) };
     olog(s, o, by, `Job accepted. Planned start ${new Date(p.start).toLocaleDateString("en-IN")}, site contact ${p.siteContact.name}${p.siteContact.phone ? `, ${p.siteContact.phone}` : ""}`);
     ping(s, o.owner, `${NAMES[by]} accepted the job at ${o.placeName}. Start ${new Date(p.start).toLocaleDateString("en-IN")}.`);
+  },
+  /** A rep turns a handover into an offer: a new opportunity of their own, with a priced draft. */
+  offerHandover(s: State, taskId: string, by: string, p: { product: ProductKey; term: number; discountPct: number }): Offer | undefined {
+    const t = s.sherpa.tasks.find((x) => x.id === taskId); const won = oppOf(s, t?.oppId); const acc = won ? accountForOpp(s, won) : undefined;
+    if (!t || !won || !acc) return;
+    const offer = SH.makeOffer(s, { accountId: acc.id, area: won.area, product: p.product, term: p.term, discountPct: p.discountPct, by, fromNba: "N25" });
+    acc.lines[p.product === "modernisation" ? "mod" : "sc"] = true; acc.lastActivity = nowS(s);
+    OP.completeTask(s, taskId, by, `${PRODUCT[p.product].label} offer ${offer.id} drafted for ${acc.name}`);
+    crm(s, by, `${PRODUCT[p.product].label} offer ${offer.id} drafted for ${acc.name} from order ${won.order?.number ?? won.id}`);
+    return offer;
+  },
+  /** The account manager records what is new on the account and hands other lines to the right reps. */
+  updateAccount(s: State, taskId: string, by: string, p: { handovers: ("ei" | "sc" | "mod")[]; note: string }) {
+    const t = s.sherpa.tasks.find((x) => x.id === taskId); const won = oppOf(s, t?.oppId); const acc = won ? accountForOpp(s, won) : undefined;
+    if (!t || !won || !acc) return;
+    p.handovers.forEach((line) => {
+      const to = s.cfg.owners[won.area]?.[line.toUpperCase() as "EI" | "SC" | "MOD"]; if (!to) return;
+      acc.lines[line] = true;
+      addTask(s, { oppId: won.id, forUser: to, by, title: `Handover pack: pursue ${line.toUpperCase()} at ${acc.name}`, detail: `${acc.name} just bought new lifts (order ${won.order?.number ?? won.id}). ${line === "mod" ? "Look at modernising the older units." : "Look at the existing units for service or repair work."}`, days: 7, kind: "handover", source: "Handover", accountId: acc.id });
+      ping(s, to, `${NAMES[by]} sent you a handover pack for ${acc.name} (${line.toUpperCase()})`);
+      crm(s, by, `Handover pack sent to ${NAMES[to]} for ${acc.name} (${line.toUpperCase()})`);
+    });
+    acc.lastActivity = nowS(s); (acc.activity ??= []).push({ t: nowS(s), by: NAMES[by] ?? by, text: `Account updated after order ${won.order?.number ?? won.id}${p.note.trim() ? `: ${p.note.trim()}` : ""}${p.handovers.length ? `. Handed over: ${p.handovers.map((x) => x.toUpperCase()).join(", ")}` : ""}` });
+    OP.completeTask(s, taskId, by, p.handovers.length ? `Account updated, ${p.handovers.length} handover${p.handovers.length > 1 ? "s" : ""} sent` : "Account updated");
   },
   /** Keeps the opportunity in step with the Snap & Lead lead it came from. */
   sync(s: State) {
@@ -738,6 +762,13 @@ export const tenderOf = (s: State, id?: string) => s.sherpa.tenders.find((t) => 
 export const daysTo = (s: State, t: number) => Math.round((t - nowS(s)) / DAY);
 
 /** An account for a Snap & Lead place that is not in the mock CRM yet. */
+/** The customer record for an opportunity. A new building site has none until it is won, so it is made here. */
+export function accountForOpp(s: State, o: Opp): Account | undefined {
+  const found = accountOf(s, o.accountId) ?? s.sherpa.accounts.find((a) => a.name === o.placeName);
+  if (found) { o.accountId = found.id; return found; }
+  const r = s.reports.find((x) => x.id === o.source.reportId); if (!r) return;
+  const acc = ensureAccount(s, r, o.owner); o.accountId = acc.id; return acc;
+}
 export function ensureAccount(s: State, r: Report, owner: string): Account {
   const found = s.sherpa.accounts.find((a) => a.placeIds.includes(r.placeId));
   if (found) return found;

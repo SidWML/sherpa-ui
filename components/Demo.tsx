@@ -8,7 +8,8 @@ import { Avatar, Btn, Icon } from "./ui";
 const SHERPA_GROUPS: [string, Role[]][] = [
   ["Sales reps", ["ni", "ei", "sc", "mod"]],
   ["Management and support", ["mgr", "am", "ss", "mkt"]],
-  ["Product", ["admin"]],
+  ["Field and service", ["tech", "sl"]],
+  // ["Product", ["admin"]],
 ];
 
 function RoleRow({ u, current, onPick }: { u: User; current: boolean; onPick: () => void }) {

@@ -1,21 +1,23 @@
 "use client";
 import { StreamText, Thinking, streamMs, thinkMs } from "../Stream";
 import { useEffect, useRef, useState } from "react";
-import { useApp, userOf } from "@/lib/store";
+import { A, H, effTier, useApp, userOf } from "@/lib/store";
 import {
-  AREA_NAME, GUIDE, NAMES, PRODUCT, SH, aboveLimit, accountOf, approversFor, assetBrief, assetOf, chaseEmail, chf, emailFor, ensureAccount, listPrice, offerOf,
+  AREA_NAME, GUIDE, KIND_LABEL, NAMES, inr, ping, stagesFor, dealNbas, reviewBrief, PRODUCT, SH, aboveLimit, accountOf, approversFor, assetBrief, assetOf, chaseEmail, chf, emailFor, ensureAccount, listPrice, offerOf,
   nowS, regionRef, variantsFor, winChance, DAY, computeNbas, isOpen, oppOf, tasksOfOpp, tenderOf, type Effect, type NbaCard,
 } from "@/lib/sherpa";
 import { DOC_NBAS, docFor, type Doc, type DocChip, type DocRef } from "@/lib/agents";
 import type { Asset, Offer, ProductKey } from "@/lib/types";
-import { Bot, Btn, Card, Icon, Pill } from "../ui";
+import { Bot, Btn, Card, Icon, Pill, TierPill, ago } from "../ui";
+import { OwnerDot } from "../shared";
 import { DiscountGauge, OfferPill, RegionCard } from "./Offers";
-import { statusLine } from "./Opps";
+import { statusLine, TaskPanel } from "./Opps";
+import { lastLog, oppNba } from "./OppBrowser";
 import { DashCard } from "../hub/parts";
 import { Choice, Input, Textarea } from "@/components/form";
 import { WinWhy } from "../Why";
 
-interface Chip { label: string; run: () => void; tone?: "green" | "red" | "soft"; icon?: string; quiet?: boolean }
+interface Chip { label: string; run: () => void; tone?: "green" | "red" | "soft"; icon?: string; quiet?: boolean; sub?: string }
 interface Ctx { assetId?: string; accountId?: string; offerId?: string; tenderId?: string; product?: ProductKey; reportId?: string; itemId?: string; nbaKey?: string; term?: number }
 type Part =
   | { k: "text"; from: "bot" | "me"; text: string; why?: string[] }
@@ -31,7 +33,9 @@ type Part =
   | { k: "doc"; doc: Doc }
   | { k: "mytasks" }
   | { k: "dash" }
-  | { k: "oppstatus"; id: string };
+  | { k: "oppstatus"; id: string }
+  | { k: "oppflow"; id: string }
+  | { k: "idle" };
 type Msg = Part & { mid: number };
 export interface Seed { id: number; card: NbaCard }
 interface Ops { card: (c: NbaCard) => void; open: (id: string) => void; opp: (id: string) => void; pick: (id: string, v: { term: number; disc: number }) => void; send: (id: string, e: { subject: string; body: string }, chase: boolean) => void; ask: (t: string) => void; go: (v: string) => void }
@@ -76,7 +80,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
   function starters(): Chip[] {
     if (noDash) {
       const cards = computeNbas(app.current.s, me_()).slice(0, 3);
-      return [...cards.map((c): Chip => ({ label: c.title.length > 50 ? c.title.slice(0, 48) + "…" : c.title, quiet: true, run: () => runCard(c) })), { label: "What needs my action?", tone: "green", run: () => ops.ask("What needs my action?") }];
+      return [...cards.map((c): Chip => ({ label: c.title, sub: `${c.cta || "Open"}${c.value ? ` · ${inr(c.value)} at stake` : ""}`, icon: c.urgency === "high" ? "warn" : "sparkle", quiet: true, run: () => runCard(c) })), { label: "What needs my action?", tone: "green", run: () => ops.ask("What needs my action?") }];
     }
     return [{ label: "What needs my action?", tone: "green", run: () => ops.ask("What needs my action?") }, ...baseStarters().map((c) => ({ ...c, tone: undefined }))];
   }
@@ -226,17 +230,25 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
     const score = (o: { id: string; title: string; placeName: string }) => words.filter((w) => `${o.id} ${o.title} ${o.placeName}`.toLowerCase().includes(w)).length;
     const best = x.opps.filter((o) => score(o) > 0).sort((p, q) => score(q) - score(p))[0] ?? x.opps.filter((o) => isOpen(o) && o.owner === me_().id)[0];
     if (!best) return void bot(["I could not find an opportunity like that. Try the place name, for example “where is the Kokapet lead?”."], starters());
-    void bot([say(`${best.id} is at the "${best.stage}" stage.`, ["Stage and whose move it is come from the open to-dos on the opportunity."]), { k: "oppstatus", id: best.id }], [{ label: "Open the opportunity", tone: "green", run: () => onOpenOpp(best.id) }, { label: "What needs my action?", run: () => ops.ask("What needs my action?") }]);
+    const lastE = lastLog(best); const nba = oppNba(app.current.s, best, me_().id); const sl = statusLine(app.current.s, best, me_().id, Date.now() + app.current.s.clock);
+    void bot([say(sl.mine ? `${best.id} needs you. Here is where it stands and what to do next.` : `Here is where ${best.id} stands and what happens next.`, ["Stage, last status and the next step come from the open to-dos and the timeline on the opportunity.", "The next step is the same one shown in the opportunity drawer."]), { k: "oppflow", id: best.id }], [{ label: "Open the opportunity", tone: "green", run: () => onOpenOpp(best.id) }, { label: "What needs my action?", run: () => ops.ask("What needs my action?") }]);
   }
   function approvals() {
     void bot([say("Here is where your approvals stand.", ["Reads the approval log on every offer."]), { k: "approvals" }], [{ label: "Open offers", run: () => go("offers") }, { label: "Back to my day", run: () => ops.ask("What needs my action?") }]);
   }
   function pipeline() {
     const now = nowS(app.current.s);
-    const st = sx().offers.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY);
-    void bot([say(`${st.length} deal${st.length === 1 ? "" : "s"} have not moved in 21 days. Here is where to step in.`, ["Stalled = sent, no activity for 21+ days.", "Totals only: no ranking of people."]), { k: "pipeline" }], [
-      { label: `Nudge the owners (${st.length})`, tone: "green", run: () => { app.current.mutate((x) => st.forEach((o) => { SH.remind(x, o.id, me_().id); x.sherpa.offers.find((q) => q.id === o.id)?.log.push({ t: nowS(x), by: me_().name, text: "Manager nudged the owner" }); })); void bot(["Nudged. They will see it in their Today feed."], starters()); } },
-      { label: "Open offers", run: () => go("offers") }]);
+    const st = sx().offers.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY).sort((a, b) => b.price - a.price);
+    void bot([say(st.length ? `${st.length} deal${st.length === 1 ? " has" : "s have"} gone quiet for 21+ days. Here is where the pipeline stands and where to step in.` : "Nothing has stalled. Here is where the pipeline stands.", ["Stalled = sent to the customer, no activity for 21+ days.", "Totals only: no ranking of people."]), { k: "pipeline" }], [
+      ...(st.length ? [{ label: `Nudge all ${st.length} owners`, tone: "green" as const, icon: "bell", run: () => { app.current.mutate((x) => st.forEach((o) => { ping(x, o.createdBy, `${o.id} for ${accountOf(x, o.accountId)?.name ?? "the customer"} has had no movement for 21+ days. Please follow up.`, o.id); x.sherpa.offers.find((q) => q.id === o.id)?.log.push({ t: nowS(x), by: me_().name, text: "Manager nudged the owner" }); })); void bot([`Done. ${st.length} owner${st.length === 1 ? " has" : "s have"} a reminder in their alerts, and it is on each offer's timeline.`], starters()); } }, { label: `Open the biggest deal (${accountOf(app.current.s, st[0].accountId)?.name ?? st[0].id})`, icon: "chev", run: () => ops.open(st[0].id) }] : []),
+      { label: "What needs my action?", run: () => ops.ask("What needs my action?") }]);
+  }
+  function idleLeads() {
+    const now = nowS(app.current.s);
+    const idle = app.current.s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "lead" && !i.silent && i.status === "new" && now - i.createdAt > 48 * H));
+    void bot([say(idle.length ? `${idle.length} lead${idle.length === 1 ? " has" : "s have"} waited over 48 hours with nobody accepting. Nudge the owner, or open the lead to reassign it.` : "Every lead has been picked up within 48 hours.", ["Idle = new lead, not accepted, older than 48 hours."]), { k: "idle" }], [
+      ...(idle.length ? [{ label: `Nudge all ${idle.length} owners`, tone: "green" as const, icon: "bell", run: () => { app.current.mutate((x) => idle.forEach((i) => A.nudge(x, i.id, me_().id))); void bot([`Nudged. Each owner has a reminder, and it is on the lead's log.`], starters()); } }] : []),
+      { label: "What needs my action?", run: () => ops.ask("What needs my action?") }]);
   }
   function risk() {
     void bot([say("These units look most at risk this quarter.", ["Health below 45 or a contract ending within 90 days."]), { k: "risk" }], [{ label: "Brief me on Lift 74821", run: () => ops.ask("Brief me on lift 74821") }, { label: "Draft the renewal", run: () => ops.ask("Draft the renewal for lift 74821") }]);
@@ -291,6 +303,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
     const lc = t.toLowerCase();
     Object.assign(ctx.current, entity(t));
     const c = ctx.current;
+    if (/\bop-\d+/i.test(t) && /where is|where.s|status of|what.s happening/.test(lc)) return whereIs(t);
     if (/\bsnap\b|spotted|saw a (lift|building)|report (a|this) lift|new lead from (a )?photo|building site/.test(lc)) return void bot(["Snap & Lead takes it from here. Add a few photos and I will read the details, ask two or three quick questions and route it to the right team. You stay on this page."], [{ label: "Snap a lead", icon: "camera", tone: "green", run: () => go("snap") }, ...starters().slice(0, 2)]);
     if (/open the approval brief|open (the )?offer/.test(lc) && c.offerId) return onOpenOffer(c.offerId);
     if (/remind the approver/.test(lc) && c.offerId) { app.current.mutate((st) => SH.remind(st, c.offerId!, me_().id)); return void bot([say("Reminded. The approver has a message with the context.")], [{ label: "Back to my day", run: () => ops.ask("What needs my action?") }]); }
@@ -300,7 +313,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
     if (/where is|where.s|status of|who is .*(waiting|working)|why .*(delay|stuck|late)|what.s happening/.test(lc)) return whereIs(t);
     if (/\bapprovals?\b|stand\b/.test(lc)) return approvals();
     if (/pipeline|team|stalled/.test(lc) && !/draft|offer/.test(lc)) return pipeline();
-    if (/not (been )?followed up|follow.?ed up|overdue lead/.test(lc)) return void bot(["The exceptions list has them, with reassign and nudge."], [{ label: "Open exceptions", tone: "green", run: () => go("exceptions") }]);
+    if (/not (been )?followed up|follow.?ed up|overdue lead/.test(lc)) return idleLeads();
     if (/at risk|risk this/.test(lc)) return risk();
     if (/(follow.?up|chase)/.test(lc) && /email|draft|write/.test(lc)) { const o = c.offerId ? offerOf(app.current.s, c.offerId) : undefined; if (!o) return void bot(["Which offer should I follow up on?"], starters()); return emailStep(o.status === "sent"); }
     if (/email|mail/.test(lc)) return emailStep(false);
@@ -364,7 +377,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
       <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="w-full space-y-3.5 px-3 py-5 @3xl:px-4">
         {msgs.map((m) => <Bubble key={m.mid} m={m} ops={ops} />)}
         {typing && <Thinking />}
-        {chips.length > 0 && !busy && <div className="pop flex flex-wrap gap-2 pt-1">{chips.map((c, k) => <button key={k} onClick={() => onChip(c)} className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-[13px] font-medium transition ${c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : "border-line bg-white hover:bg-surface"}`}>{c.icon && <Icon n={c.icon} s={14} />}{c.label}</button>)}</div>}
+        {chips.length > 0 && !busy && <div className="pop flex flex-wrap gap-2 pt-1">{chips.map((c, k) => c.sub ? <button key={k} onClick={() => onChip(c)} className="group flex w-full items-start gap-3 rounded-xl border border-line bg-white p-3 text-left transition hover:border-brand/40 hover:bg-brand-soft/30"><span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${c.icon === "warn" ? "bg-red-50 text-red-700" : "bg-brand-soft text-brand"}`}><Icon n={c.icon ?? "sparkle"} s={16} /></span><span className="min-w-0 flex-1"><span className="block text-[13.5px] font-semibold leading-snug">{c.label}</span><span className="mt-0.5 block text-[12.5px] text-muted">{c.sub}</span></span><span className="mt-1 text-muted transition group-hover:translate-x-0.5"><Icon n="chev" s={14} /></span></button> : <button key={k} onClick={() => onChip(c)} className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-[13px] font-medium transition ${c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : "border-line bg-white hover:bg-surface"}`}>{c.icon && <Icon n={c.icon} s={14} />}{c.label}</button>)}</div>}
       </div></div>
       <div className="shrink-0 bg-surface"><div className="w-full px-3 pb-2 pt-2.5">
         <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-lg border border-brand/60 bg-white p-1.5 focus-within:border-brand">
@@ -397,13 +410,35 @@ function CardView({ m, ops }: { m: Msg; ops: Ops }) {
   if (m.k === "brief") return <Card className="p-4"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><span className="grid h-6 w-6 place-items-center rounded-md bg-brand-soft text-brand"><Icon n="doc" s={14} /></span>{m.title}</div>{m.rows.map(([k, v]) => <div key={k} className="flex justify-between gap-3 border-b border-line/70 py-2 text-[13px] last:border-0"><span className="shrink-0 text-muted">{k}</span><span className="text-right font-medium">{v}</span></div>)}<div className="mt-2 text-[11px] text-muted">Sources: {m.sources.join(" · ")}</div></Card>;
   if (m.k === "doc") return <DocCard doc={m.doc} />;
   if (m.k === "dash") return <DashCard onOpen={ops.opp} onDo={ops.card} go={ops.go} />;
-  if (m.k === "mytasks") {
-    const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).sort((a, b) => b.createdAt - a.createdAt);
-    return <Card className="divide-y divide-line">{mine.length === 0 && <div className="p-4 text-sm text-muted">Nothing is waiting on you.</div>}{mine.slice(0, 8).map((t) => { const o = oppOf(s, t.oppId); return <button key={t.id} onClick={() => o && ops.opp(o.id)} className="flex w-full items-center gap-3 p-3 text-left hover:bg-surface"><div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{t.title}</div><div className="text-xs text-muted">{o ? o.id + " · " + o.title : "Task"} · from {NAMES[t.by]} · {t.due < now ? "overdue" : "due in " + Math.max(0, Math.round((t.due - now) / DAY)) + " days"}</div></div><Icon n="chev" s={14} /></button>; })}</Card>;
-  }
+  if (m.k === "mytasks") return <MyTasksBoard onOpen={ops.opp} />;
   if (m.k === "oppstatus") {
     const o = oppOf(s, m.id); if (!o) return null; const st = statusLine(s, o, me!.id, now);
     return <Card className="p-4"><div className="text-[15px] font-semibold">{o.title}</div><div className="text-xs text-muted">{o.id} · {o.placeName} · owner {NAMES[o.owner]}</div><div className={"mt-3 rounded-xl px-3 py-2 text-[13px] " + (st.mine ? "bg-amber-50 text-amber-900" : "bg-surface")}>{st.text}</div>{tasksOfOpp(s, o.id).length > 0 && <ul className="mt-3 space-y-1.5 text-[13px]">{tasksOfOpp(s, o.id).map((t) => <li key={t.id} className="flex justify-between gap-3"><span>{t.title}</span><span className="shrink-0 text-xs text-muted">{NAMES[t.forUser ?? ""]}</span></li>)}</ul>}</Card>;
+  }
+  if (m.k === "oppflow") {
+    const o = oppOf(s, m.id); if (!o) return null;
+    const open = tasksOfOpp(s, o.id).sort((x, y) => x.due - y.due); const mine = open.filter((x) => x.forUser === me!.id);
+    const nba = oppNba(s, o, me!.id); const last = lastLog(o); const sl = statusLine(s, o, me!.id, now); const stages = stagesFor(o);
+    const idx = Math.max(0, stages.findIndex((x) => x[0] === o.stage)); const other = mine.length ? undefined : open[0];
+    return (
+      <div className="space-y-3">
+        <Card className="overflow-hidden">
+          <div className="p-4">
+            <div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{o.id}</span>{o.tier && <TierPill tier={o.tier} />}<Pill tone="blue">{KIND_LABEL[o.kind]}</Pill>{sl.late && <Pill tone="red">Overdue</Pill>}</div>
+            <div className="mt-1.5 text-[15px] font-semibold leading-snug">{o.title}</div>
+            <div className="text-xs text-muted">{AREA_NAME[o.area] ?? o.area} · owner {NAMES[o.owner] ?? "not set"}{o.value ? ` · ${inr(o.value)}` : ""}</div>
+            <ol className="mt-3 flex gap-1" aria-label="Stage">{stages.map(([k, l], i) => <li key={k} title={l} className={`h-1.5 flex-1 rounded-full ${i < idx || o.stage === "won" ? "bg-brand" : i === idx ? "bg-brand/60" : "bg-line"}`} />)}</ol>
+            <div className="mt-1 text-[11.5px] font-medium text-muted">Stage {idx + 1} of {stages.length} · {stages[idx]?.[1] ?? o.stage}</div>
+          </div>
+          <div className="divide-y divide-line border-t border-line text-[13px]">
+            <div className="flex gap-3 px-4 py-3"><span className="mt-0.5 text-muted"><Icon n="clock" s={15} /></span><div className="min-w-0"><div className="t-label">Last status</div><div className="mt-0.5 font-medium">{last ? last.text : "No activity yet"}</div>{last && <div className="text-xs text-muted">{last.by} · {ago(now - last.t)}</div>}</div></div>
+            <div className={`flex gap-3 px-4 py-3 ${mine.length ? "bg-amber-50" : "bg-brand-soft/50"}`}><span className="mt-0.5 text-brand"><Icon n={mine.length ? "bolt" : "sparkle"} s={15} /></span><div className="min-w-0"><div className="t-label">{mine.length ? "Your next step" : "Next step"}</div><div className="mt-0.5 font-semibold">{nba.title}</div>{nba.why && <div className="text-xs text-muted">{nba.why}</div>}{other && <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-line"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Waiting on {NAMES[other.forUser ?? ""] ?? "someone"} · since {ago(now - other.createdAt)}</div>}</div></div>
+          </div>
+          <div className="flex border-t border-line"><button onClick={() => ops.opp(o.id)} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 text-[13px] font-semibold text-brand hover:bg-brand-soft">Open full opportunity <Icon n="chev" s={13} /></button></div>
+        </Card>
+        {mine.map((x) => <TaskPanel key={x.id} o={o} t={x} openOffer={ops.open} />)}
+      </div>
+    );
   }
   if (m.k === "offer") return <OfferCard id={m.id} />;
   if (m.k === "region") { const o = offerOf(s, m.id); return o ? <Card className="p-4"><RegionCard o={o} /></Card> : null; }
@@ -414,10 +449,8 @@ function CardView({ m, ops }: { m: Msg; ops: Ops }) {
     const list = s.sherpa.offers.filter((o) => (mgr ? o.approvals.length > 0 && ["awaiting", "approved", "changes", "rejected"].includes(o.status) : o.createdBy === me!.id && (o.approvals.length > 0 || ["draft", "approved"].includes(o.status))));
     return <Card className="divide-y divide-line">{list.length === 0 && <div className="p-4 text-sm text-muted">No approvals open.</div>}{list.slice(0, 6).map((o) => <button key={o.id} onClick={() => ops.open(o.id)} className="flex w-full items-center gap-3 p-3 text-left hover:bg-surface"><div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{accountOf(s, o.accountId)?.name} · {o.id}</div><div className="text-xs text-muted">{o.discountPct}% off · {chf(o.price)}{o.approvals.length ? ` · ${o.approvals.map((x) => `${NAMES[x.by]}: ${x.status}`).join(", ")}` : ""}</div></div><OfferPill o={o} /></button>)}</Card>;
   }
-  if (m.k === "pipeline") {
-    const st = s.sherpa.offers.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY);
-    return <Card className="divide-y divide-line">{st.length === 0 && <div className="p-4 text-sm text-muted">Nothing stalled.</div>}{st.map((o) => <button key={o.id} onClick={() => ops.open(o.id)} className="flex w-full items-center gap-3 p-3 text-left hover:bg-surface"><div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{accountOf(s, o.accountId)?.name}</div><div className="text-xs text-muted">{o.title} · idle {Math.floor((now - o.lastActivity) / DAY)} days · {userOf(o.createdBy)?.name}</div></div><b className="num text-sm">{chf(o.price)}</b></button>)}{st.length > 0 && <div className="flex justify-between p-3 text-[13px]"><span className="text-muted">At stake</span><b className="num">{chf(st.reduce((a, o) => a + o.price, 0))}</b></div>}</Card>;
-  }
+  if (m.k === "pipeline") return <PipelineBoard onOpen={ops.open} />;
+  if (m.k === "idle") return <IdleBoard onOpen={ops.opp} />;
   if (m.k === "risk") {
     const list = s.sherpa.assets.filter((a) => a.health < 45 || (a.contractEnd && a.contractEnd - now < 90 * DAY && a.health < 60)).sort((p, q) => p.health - q.health);
     return <Card className="divide-y divide-line">{list.map((a) => <div key={a.id} className="flex items-center gap-3 p-3"><div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{accountOf(s, a.accountId)?.name}</div><div className="text-xs text-muted">{a.label.split(" · ")[0]} · {a.contractEnd ? `contract ends in ${Math.round((a.contractEnd - now) / DAY)} days` : "no contract"} · {a.callbacks90d} callbacks in 90 days</div></div><Pill tone={a.health < 45 ? "red" : "amber"}>Health {a.health}</Pill></div>)}</Card>;
@@ -532,5 +565,136 @@ function DocCard({ doc }: { doc: Doc }) {
       </div>
       <div className="mt-3 text-[11px] text-muted">{doc.agent} · simulated · Sources: {doc.sources.join(" · ")}</div>
     </Card>
+  );
+}
+
+/* ---------------------------------------------------------- "what needs my action": a visual board */
+const TASK_ICON: Record<string, string> = { accept: "check", contact: "phone", followup: "phone", findContact: "search", research: "search", review: "flag", siteVisit: "pin", job: "gear", order: "gear", dealSetup: "layers", quoteBrief: "doc", config: "doc", tenderDoc: "doc", approveBid: "check", approveWin: "check", agreed: "check", bidReview: "doc", bidConfirm: "doc" };
+const TASK_META = {
+  late: { label: "Overdue", dot: "#e3001b", bg: "#fdecee", fg: "#b4121f" },
+  today: { label: "Due today", dot: "#f59e0b", bg: "#fdf0cf", fg: "#9a6a00" },
+  week: { label: "This week", dot: "#2563eb", bg: "#e6effd", fg: "#1d4ed8" },
+  later: { label: "Later", dot: "#9ca3af", bg: "#eeeef1", fg: "#4a4a55" },
+} as const;
+function MyTasksBoard({ onOpen }: { onOpen: (id: string) => void }) {
+  const { s, me, now } = useApp();
+  const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id);
+  const band = (due: number) => (due < now ? "late" : due - now < DAY ? "today" : due - now < 7 * DAY ? "week" : "later") as keyof typeof TASK_META;
+  const groups = (["late", "today", "week", "later"] as const).map((k) => ({ k, rows: mine.filter((t) => band(t.due) === k).sort((a, b) => a.due - b.due) }));
+  if (mine.length === 0) return <Card className="grid place-items-center gap-2 p-8 text-center"><span className="grid h-12 w-12 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Icon n="check" s={22} /></span><div className="text-[15px] font-semibold">All clear</div><div className="text-[13px] text-muted">Nothing is waiting on you.</div></Card>;
+  const dueText = (t: { due: number }) => { const k = band(t.due); if (k === "late") return `${Math.max(1, Math.round((now - t.due) / DAY))}d late`; if (k === "today") return "Today"; const d = Math.ceil((t.due - now) / DAY); return d === 1 ? "Tomorrow" : `In ${d} days`; };
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-4 gap-2">{groups.map(({ k, rows }) => <div key={k} className="rounded-xl border border-line bg-white px-2 py-2.5 text-center" style={rows.length ? { background: TASK_META[k].bg, borderColor: "transparent" } : undefined}><div className="num text-[22px] font-semibold leading-none" style={{ color: rows.length ? TASK_META[k].fg : "var(--color-muted)" }}>{rows.length}</div><div className="mt-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: rows.length ? TASK_META[k].fg : "var(--color-muted)" }}>{TASK_META[k].label}</div></div>)}</div>
+      {groups.filter((g) => g.rows.length).map(({ k, rows }) => (
+        <section key={k}>
+          <h3 className="mb-1.5 flex items-center gap-2 px-1 text-[11.5px] font-semibold uppercase tracking-wide text-muted"><span className="h-2 w-2 rounded-full" style={{ background: TASK_META[k].dot }} />{TASK_META[k].label}</h3>
+          <div className="space-y-2">{rows.slice(0, 6).map((t) => {
+            const o = oppOf(s, t.oppId); const stages = o ? stagesFor(o) : []; const idx = o ? Math.max(0, stages.findIndex((x) => x[0] === o.stage)) : 0;
+            return (
+              <button key={t.id} onClick={() => o && onOpen(o.id)} className="sheet group relative flex w-full gap-3 overflow-hidden p-3 text-left transition hover:bg-surface">
+                <span className="absolute inset-y-0 left-0 w-1" style={{ background: TASK_META[k].dot }} />
+                <span className="ml-1 grid h-10 w-10 shrink-0 place-items-center rounded-lg" style={{ background: TASK_META[k].bg, color: TASK_META[k].fg }}><Icon n={TASK_ICON[t.kind ?? ""] ?? "bolt"} s={18} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-start justify-between gap-2"><span className="text-[13.5px] font-semibold leading-snug">{t.title}</span><span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: TASK_META[k].bg, color: TASK_META[k].fg }}>{dueText(t)}</span></span>
+                  {o && <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted"><span className="font-mono font-bold">{o.id}</span><span>{o.placeName}</span>{o.value ? <span className="num font-semibold text-ink/70">{inr(o.value)}</span> : null}</span>}
+                  {o && stages.length > 0 && <span className="mt-2 flex items-center gap-2"><span className="flex flex-1 gap-0.5">{stages.map(([sk], i) => <span key={sk} className={`h-1 flex-1 rounded-full ${i < idx ? "bg-brand" : i === idx ? "bg-brand/50" : "bg-line"}`} />)}</span><span className="text-[11px] text-muted">{stages[idx]?.[1]}</span></span>}
+                  <span className="mt-1.5 block text-[11.5px] text-muted">From {NAMES[t.by] ?? t.by}</span>
+                </span>
+                <span className="self-center text-muted transition group-hover:translate-x-0.5"><Icon n="chev" s={14} /></span>
+              </button>);
+          })}{rows.length > 6 && <div className="px-1 text-xs text-muted">+ {rows.length - 6} more {TASK_META[k].label.toLowerCase()}</div>}</div>
+        </section>))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- pipeline risk: flow, split and the deals to chase */
+const shortInr = (n: number) => (n >= 1e7 ? `₹${(n / 1e7).toFixed(2).replace(/\.?0+$/, "")} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(1).replace(/\.0$/, "")} L` : inr(n));
+function PipelineBoard({ onOpen }: { onOpen: (id: string) => void }) {
+  const { s, me, now, mutate } = useApp();
+  const [nudged, setNudged] = useState<string[]>([]);
+  const live = s.sherpa.offers.filter((o) => !["won", "lost", "rejected"].includes(o.status));
+  const stalled = live.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY).sort((a, b) => b.price - a.price);
+  const quiet = new Set(stalled.map((o) => o.id));
+  const sum = (l: { price: number }[]) => l.reduce((a, o) => a + o.price, 0);
+  const steps = [
+    { k: "draft", label: "Draft", icon: "doc", list: live.filter((o) => o.status === "draft"), fg: "#4a4a55", bg: "#eeeef1", bar: "#9ca3af" },
+    { k: "approval", label: "Approval", icon: "flag", list: live.filter((o) => o.status === "awaiting" || o.status === "changes"), fg: "#9a6a00", bg: "#fdf0cf", bar: "#f59e0b" },
+    { k: "ready", label: "Ready", icon: "check", list: live.filter((o) => o.status === "approved"), fg: "#1d4ed8", bg: "#e6effd", bar: "#3b82f6" },
+    { k: "sent", label: "With customer", icon: "send", list: live.filter((o) => o.status === "sent" && !quiet.has(o.id)), fg: "#047857", bg: "#d9f3e7", bar: "#10b981" },
+    { k: "stalled", label: "Gone quiet", icon: "warn", list: stalled, fg: "#b4121f", bg: "#fdecee", bar: "#e3001b" },
+  ];
+  const total = sum(live) || 1; const atStake = sum(stalled);
+  const mine = me!.id;
+  const nudge = (o: (typeof stalled)[number]) => { mutate((x) => { ping(x, o.createdBy, `${o.id} for ${accountOf(x, o.accountId)?.name ?? "the customer"} has had no movement for 21+ days. Please follow up.`, o.id); x.sherpa.offers.find((q) => q.id === o.id)?.log.push({ t: nowS(x), by: NAMES[mine] ?? mine, text: "Manager nudged the owner" }); }); setNudged((n) => [...n, o.id]); };
+  return (
+    <div className="space-y-3">
+      <Card className="overflow-hidden">
+        <div className="flex items-end justify-between gap-3 p-4">
+          <div><div className="t-label">Open pipeline</div><div className="num mt-1 text-[26px] font-semibold leading-none">{shortInr(sum(live))}</div><div className="mt-1 text-xs text-muted">{live.length} live offer{live.length === 1 ? "" : "s"}</div></div>
+          <div className="text-right"><div className="t-label">At risk</div><div className="num mt-1 text-[26px] font-semibold leading-none" style={{ color: stalled.length ? "#b4121f" : "#047857" }}>{shortInr(atStake)}</div><div className="mt-1 text-xs text-muted">{Math.round((atStake / total) * 100)}% of the value</div></div>
+        </div>
+        <div className="flex h-2.5 w-full overflow-hidden bg-line" role="img" aria-label="Pipeline value by stage">{steps.map((st) => { const v = sum(st.list); return v ? <span key={st.k} title={`${st.label}: ${shortInr(v)}`} style={{ width: `${(v / total) * 100}%`, background: st.bar }} /> : null; })}</div>
+        <div className="grid grid-cols-5 items-start gap-0.5 px-2 py-3" aria-label="Where the deals are">
+          {steps.map((st, i) => (
+            <div key={st.k} className="relative flex flex-col items-center text-center">
+              <span className="grid h-9 w-9 place-items-center rounded-full" style={{ background: st.bg, color: st.fg, boxShadow: st.k === "stalled" && st.list.length ? "0 0 0 3px #fdecee" : undefined }}><Icon n={st.icon} s={16} /></span>
+              <span className="num mt-1 text-[17px] font-semibold leading-none" style={{ color: st.list.length ? st.fg : "var(--color-muted)" }}>{st.list.length}</span>
+              <span className="mt-0.5 text-[10.5px] font-medium leading-tight text-muted">{st.label}</span>
+              <span className="num text-[10.5px] text-muted">{st.list.length ? shortInr(sum(st.list)) : "–"}</span>
+              {i < steps.length - 1 && <span className="absolute -right-1 top-2.5 text-muted/60"><Icon n="chev" s={12} /></span>}
+            </div>))}
+        </div>
+      </Card>
+      {stalled.length === 0 ? <Card className="grid place-items-center gap-2 p-6 text-center"><span className="grid h-11 w-11 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Icon n="check" s={20} /></span><div className="text-[14px] font-semibold">Nothing has gone quiet</div><div className="text-xs text-muted">Every sent offer moved in the last 21 days.</div></Card> : (
+        <section>
+          <h3 className="mb-1.5 flex items-center gap-2 px-1 text-[11.5px] font-semibold uppercase tracking-wide text-muted"><span className="h-2 w-2 rounded-full bg-[#e3001b]" />Step in here · biggest first</h3>
+          <div className="space-y-2">{stalled.map((o) => {
+            const days = Math.floor((now - o.lastActivity) / DAY); const pct = Math.min(100, (days / 45) * 100); const done = nudged.includes(o.id);
+            return (
+              <div key={o.id} className="sheet overflow-hidden">
+                <button onClick={() => onOpen(o.id)} className="group flex w-full items-start gap-3 p-3 text-left transition hover:bg-surface">
+                  <OwnerDot id={o.createdBy} size={34} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start justify-between gap-2"><span className="text-[13.5px] font-semibold leading-snug">{accountOf(s, o.accountId)?.name ?? o.id}</span><span className="num shrink-0 text-[14px] font-semibold">{shortInr(o.price)}</span></span>
+                    <span className="mt-0.5 block text-xs text-muted">{PRODUCT[o.product].label} · {NAMES[o.createdBy] ?? o.createdBy}</span>
+                    <span className="mt-2 block"><span className="relative block h-2 rounded-full bg-line"><span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: days >= 30 ? "#e3001b" : "#f59e0b" }} /><span className="absolute -top-0.5 h-3 w-0.5 bg-ink/40" style={{ left: `${(21 / 45) * 100}%` }} title="21-day limit" /></span><span className="mt-1 flex justify-between text-[11px] text-muted"><span><b className="text-ink">{days} days</b> without movement</span><span>limit 21</span></span></span>
+                  </span>
+                </button>
+                <div className="flex divide-x divide-line border-t border-line text-[12.5px] font-semibold">
+                  <button onClick={() => onOpen(o.id)} className="flex min-h-10 flex-1 items-center justify-center gap-1.5 text-ink hover:bg-surface"><Icon n="doc" s={13} />Open offer</button>
+                  <button disabled={done} onClick={() => nudge(o)} className={`flex min-h-10 flex-1 items-center justify-center gap-1.5 ${done ? "text-emerald-700" : "text-brand hover:bg-brand-soft"}`}>{done ? <><Icon n="check" s={13} w={3} />Nudged</> : <><Icon n="bell" s={13} />Nudge {NAMES[o.createdBy]?.split(" ")[0]}</>}</button>
+                </div>
+              </div>); })}</div>
+        </section>)}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- leads nobody has picked up */
+function IdleBoard({ onOpen }: { onOpen: (id: string) => void }) {
+  const { s, me, now, mutate } = useApp();
+  const [nudged, setNudged] = useState<string[]>([]);
+  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "lead" && !i.silent && i.status === "new" && now - i.createdAt > 48 * H).map((it) => ({ r, it }))).sort((a, b) => a.it.createdAt - b.it.createdAt);
+  if (rows.length === 0) return <Card className="grid place-items-center gap-2 p-6 text-center"><span className="grid h-11 w-11 place-items-center rounded-full bg-emerald-100 text-emerald-700"><Icon n="check" s={20} /></span><div className="text-[14px] font-semibold">Every lead is picked up</div></Card>;
+  return (
+    <div className="space-y-2">{rows.map(({ r, it }) => {
+      const hrs = Math.floor((now - it.createdAt) / H); const pct = Math.min(100, (hrs / 120) * 100); const opp = s.sherpa.opps.find((o) => o.source.itemId === it.id); const done = nudged.includes(it.id);
+      return (
+        <div key={it.id} className="sheet overflow-hidden">
+          <div className="flex items-start gap-3 p-3">
+            <OwnerDot id={it.ownerId} size={34} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2"><span className="text-[13.5px] font-semibold leading-snug">{r.placeName}</span><TierPill tier={effTier(it)} /></div>
+              <div className="mt-0.5 text-xs text-muted">{it.title} · owner {userOf(it.ownerId)?.name ?? "not assigned"}{it.nudges ? ` · nudged ${it.nudges}×` : ""}</div>
+              <div className="mt-2"><span className="relative block h-2 rounded-full bg-line"><span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%`, background: hrs >= 96 ? "#e3001b" : "#f59e0b" }} /><span className="absolute -top-0.5 h-3 w-0.5 bg-ink/40" style={{ left: `${(48 / 120) * 100}%` }} title="48-hour limit" /></span><span className="mt-1 flex justify-between text-[11px] text-muted"><span><b className="text-ink">{hrs >= 72 ? `${Math.floor(hrs / 24)} days` : `${hrs} hours`}</b> waiting</span><span>limit 48 h</span></span></div>
+            </div>
+          </div>
+          <div className="flex divide-x divide-line border-t border-line text-[12.5px] font-semibold">
+            <button disabled={!opp} onClick={() => opp && onOpen(opp.id)} className="flex min-h-10 flex-1 items-center justify-center gap-1.5 text-ink hover:bg-surface disabled:opacity-40"><Icon n="users" s={13} />Open and reassign</button>
+            <button disabled={done} onClick={() => { mutate((st) => A.nudge(st, it.id, me!.id)); setNudged((n) => [...n, it.id]); }} className={`flex min-h-10 flex-1 items-center justify-center gap-1.5 ${done ? "text-emerald-700" : "text-brand hover:bg-brand-soft"}`}>{done ? <><Icon n="check" s={13} w={3} />Nudged</> : <><Icon n="bell" s={13} />Nudge owner</>}</button>
+          </div>
+        </div>); })}</div>
   );
 }

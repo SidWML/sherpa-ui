@@ -1,8 +1,8 @@
 "use client";
 import { useState } from "react";
 import { A, useApp } from "@/lib/store";
-import { AREA_NAME, BID_PAPERS, DAY, MANAGER, NAMES, OP, SH, SUPPORT, accountOf, daysTo, inr, lastLoss, offerOf, researchFindings, tenderOf } from "@/lib/sherpa";
-import type { Opp, Task, TalkOutcome } from "@/lib/types";
+import { AREA_NAME, BID_PAPERS, DAY, MANAGER, NAMES, OP, PRODUCT, SH, SUPPORT, accountOf, daysTo, inr, lastLoss, listPrice, offerOf, researchFindings, tenderOf } from "@/lib/sherpa";
+import type { Opp, ProductKey, Task, TalkOutcome } from "@/lib/types";
 import { Btn, Card, Icon, ago } from "../ui";
 import { Check, Choice, Input } from "@/components/form";
 import { Label } from "./Action";
@@ -20,15 +20,38 @@ export function FindContactNI({ o }: { o: Opp }) {
   const toggle = (w: string) => setWant((x) => (x.includes(w) ? x.filter((y) => y !== w) : [...x, w]));
   return (
     <Panel title="Find the customer" why={`We have no contact for ${o.placeName}. Pick how to find one.`} does="Sales support searches the building permit, the company register and our customer records. They never call the customer." then="You get the contact back and record your conversation with the customer.">
-      <div className="grid grid-cols-1 gap-3 @3xl:grid-cols-3">
-        <div className="rounded-xl border border-brand/40 p-3 text-[13px]">
-          <b className="block text-[13.5px]">Ask Sales support</b>
-          <span className="text-muted">What should they find?</span>
-          <div className="mt-2 flex flex-col gap-1.5">{WANTS.map((w) => <Check key={w} checked={want.includes(w)} onChange={() => toggle(w)}>{w}</Check>)}</div>
-          <Btn sm className="mt-3" disabled={!want.length} onClick={() => mutate((st) => OP.research(st, o.id, by, want))}>Ask {NAMES[SUPPORT]?.split(" ")[0]}</Btn>
+      <div className="space-y-3">
+        <div className="rounded-xl border border-brand/40 bg-brand-soft/40 p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand text-white"><Icon n="search" s={18} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2"><b className="text-[14px]">Ask Sales support</b><span className="rounded-full bg-brand px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-white">Recommended</span></div>
+              <p className="mt-0.5 text-[13px] text-muted">Pick what they should look for. You can choose more than one.</p>
+              <div className="mt-3 flex flex-wrap gap-2">{WANTS.map((w) => { const on = want.includes(w); return <button key={w} type="button" aria-pressed={on} onClick={() => toggle(w)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-medium transition ${on ? "border-brand bg-brand text-white" : "border-line bg-white text-ink hover:bg-surface"}`}>{on && <Icon n="check" s={12} w={3} />}{w}</button>; })}</div>
+              <button type="button" disabled={!want.length} onClick={() => mutate((st) => OP.research(st, o.id, by, want))} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 text-[13.5px] font-semibold text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50 @md:w-auto"><Icon n="send" s={14} /> Send to {NAMES[SUPPORT]?.split(" ")[0]}{want.length ? ` (${want.length})` : ""}</button>
+            </div>
+          </div>
         </div>
-        <button disabled={!canAsk} onClick={() => mutate((st) => OP.askReporter(st, o.id, by))} className="rounded-xl border border-line p-3 text-left text-[13px] hover:bg-surface disabled:opacity-50"><b className="block text-[13.5px]">Ask {canAsk ? NAMES[reporter!] : "the person who spotted it"}</b>{canAsk ? "They saw the site. They check the hoarding for a developer name and phone." : "You spotted it yourself, so there is nobody else to ask."}</button>
-        <button onClick={() => mutate((st) => OP.selfContact(st, o.id, by))} className="rounded-xl border border-line p-3 text-left text-[13px] hover:bg-surface"><b className="block text-[13.5px]">I will find them myself</b>Walk in or call the site office, then record the conversation.</button>
+        <div className="rounded-xl border border-line bg-white p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface text-ink"><Icon n="users" s={18} /></span>
+            <div className="min-w-0 flex-1">
+              <b className="text-[14px]">Ask {canAsk ? NAMES[reporter!] : "the person who spotted it"}</b>
+              <p className="mt-0.5 text-[13px] text-muted">{canAsk ? "They saw the site. They check the hoarding for a developer name and phone." : "You spotted it yourself, so there is nobody else to ask."}</p>
+              <button type="button" disabled={!canAsk} onClick={() => mutate((st) => OP.askReporter(st, o.id, by))} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 text-[13.5px] font-semibold text-ink transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50 @md:w-auto">Ask {canAsk ? NAMES[reporter!]?.split(" ")[0] : "reporter"}</button>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-line bg-white p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface text-ink"><Icon n="pin" s={18} /></span>
+            <div className="min-w-0 flex-1">
+              <b className="text-[14px]">I will find them myself</b>
+              <p className="mt-0.5 text-[13px] text-muted">Walk in or call the site office, then record the conversation.</p>
+              <button type="button" onClick={() => mutate((st) => OP.selfContact(st, o.id, by))} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 text-[13.5px] font-semibold text-ink transition hover:bg-surface @md:w-auto">Start myself</button>
+            </div>
+          </div>
+        </div>
       </div>
     </Panel>
   );
@@ -62,11 +85,11 @@ export function ResearchPanel({ o, t }: { o: Opp; t: Task }) {
   );
 }
 
-const OUTCOMES: { k: TalkOutcome; title: string; text: string }[] = [
-  { k: "quote", title: "Wants a quote", text: "We quote the customer directly." },
-  { k: "tender", title: "Has a formal tender", text: "Attach the tender document. Sales support fills in the lift details." },
-  { k: "callback", title: "Call back later", text: "No answer, or not the right time. A reminder is set." },
-  { k: "notInterested", title: "Not interested", text: "The lead is closed with a reason." },
+const OUTCOMES: { k: TalkOutcome; title: string; text: string; icon: string; tone: string; soft: string; cta: string }[] = [
+  { k: "quote", title: "Wants a quote", text: "We quote the customer directly.", icon: "doc", tone: "#1d4ed8", soft: "#e6effd", cta: "Save and start the quote" },
+  { k: "tender", title: "Has a formal tender", text: "Attach the document. Sales support fills in the lift details.", icon: "layers", tone: "#7c3aed", soft: "#ece9fb", cta: "Save and send to Sales support" },
+  { k: "callback", title: "Call back later", text: "No answer, or not the right time. A reminder is set.", icon: "clock", tone: "#9a6a00", soft: "#fdf0cf", cta: "Save and set the reminder" },
+  { k: "notInterested", title: "Not interested", text: "The lead is closed with a reason.", icon: "x", tone: "#b4121f", soft: "#fdecee", cta: "Save and close the lead" },
 ];
 
 export function TalkPanel({ o, t }: { o: Opp; t: Task }) {
@@ -89,19 +112,48 @@ export function TalkPanel({ o, t }: { o: Opp; t: Task }) {
         <Q label="What was said?"><Field v={f.said} set={set("said")} ph="e.g. Structure at floor 8, they want lifts installed by March" area /></Q>
         <Q label="What does the customer want?"><div className="grid grid-cols-1 gap-2 @2xl:grid-cols-3"><Field v={f.lifts} set={set("lifts")} ph="Lifts, e.g. 4" /><Field v={f.floors} set={set("floors")} ph="Floors, e.g. G+12" /><Choice value={f.when} onChange={set("when")} placeholder="When" aria-label="When" options={["Now", "Within 3 months", "This year", "No plan yet"]} /></div></Q>
         <Q label="What happens next?">
-          <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-2">{OUTCOMES.map((x) => (
-            <button key={x.k} type="button" aria-pressed={f.outcome === x.k} onClick={() => set("outcome")(x.k)} className={`rounded-xl border p-3 text-left text-[13px] ${f.outcome === x.k ? "border-brand bg-brand-soft" : "border-line hover:bg-surface"}`}><b className="block text-[13.5px]">{x.title}</b><span className="text-muted">{x.text}</span></button>))}</div>
+          <div className="grid grid-cols-1 gap-2 @xl:grid-cols-2">{OUTCOMES.map((x) => { const on = f.outcome === x.k; return (
+            <button key={x.k} type="button" aria-pressed={on} onClick={() => set("outcome")(x.k)} className={`relative flex items-start gap-3 rounded-xl border p-3 text-left transition ${on ? "border-brand bg-brand-soft/60 shadow-sm" : "border-line bg-white hover:bg-surface"}`}>
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg" style={{ background: x.soft, color: x.tone }}><Icon n={x.icon} s={18} /></span>
+              <span className="min-w-0 flex-1 pr-6"><b className="block text-[13.5px]">{x.title}</b><span className="text-[12.5px] leading-snug text-muted">{x.text}</span></span>
+              <span className={`absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-full border-2 ${on ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{on && <Icon n="check" s={11} w={3.5} />}</span>
+            </button>); })}</div>
         </Q>
         {f.outcome === "tender" && (
-          <div className="pop grid grid-cols-1 gap-2 rounded-xl border border-line p-3 @2xl:grid-cols-[1fr_auto]">
-            {f.file ? <div className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-[13px]"><Icon n="doc" s={15} /><span className="min-w-0 flex-1 truncate"><b>{f.file}</b></span><button onClick={() => set("file")("")} className="text-[12.5px] font-semibold text-brand">Change</button></div>
-              : <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-line px-3 py-2 text-[13px] hover:bg-surface"><Icon n="upload" s={15} /><span>Attach the tender document</span><input type="file" accept=".pdf,.doc,.docx" className="sr-only" onChange={(e) => set("file")(e.target.files?.[0]?.name ?? "")} /></label>}
-            <Choice value={f.eord} onChange={set("eord")} aria-label="Bid due" options={["14", "30", "45", "60"].map((d) => ({ value: d, label: `Bid due in ${d} days` }))} />
+          <div className="pop overflow-hidden rounded-xl border border-line bg-white">
+            <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5 text-[12.5px] font-semibold"><span className="text-violet-700"><Icon n="layers" s={14} /></span>Tender details</div>
+            <div className="space-y-4 p-4">
+              <div>
+                <div className="mb-1.5 text-[13px] font-semibold">Tender document</div>
+                {f.file
+                  ? <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-emerald-700"><Icon n="doc" s={17} /></span><span className="min-w-0 flex-1"><b className="block truncate text-[13.5px]">{f.file}</b><span className="text-xs text-emerald-800">Attached</span></span><button type="button" onClick={() => set("file")("")} className="rounded-md border border-emerald-300 bg-white px-2.5 py-1 text-[12.5px] font-semibold text-emerald-800 hover:bg-emerald-100">Replace</button></div>
+                  : <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed border-line bg-surface/60 px-4 py-6 text-center transition hover:border-brand/50 hover:bg-brand-soft/40"><span className="grid h-11 w-11 place-items-center rounded-full bg-white text-brand shadow-sm"><Icon n="upload" s={20} /></span><span className="text-[13.5px] font-semibold">Attach the tender document</span><span className="text-xs text-muted">PDF, DOC or DOCX · click to choose a file</span><input type="file" accept=".pdf,.doc,.docx" className="sr-only" onChange={(e) => set("file")(e.target.files?.[0]?.name ?? "")} /></label>}
+              </div>
+              <div>
+                <div className="mb-1.5 text-[13px] font-semibold">When is the bid due?</div>
+                <div role="group" aria-label="Bid due" className="grid grid-cols-4 gap-2">{["14", "30", "45", "60"].map((d) => { const on = f.eord === d; return <button key={d} type="button" aria-pressed={on} onClick={() => set("eord")(d)} className={`rounded-lg border py-2 text-center transition ${on ? "border-brand bg-brand text-white" : "border-line bg-white hover:bg-surface"}`}><span className="num block text-[17px] font-semibold leading-none">{d}</span><span className={`text-[11px] ${on ? "text-white/80" : "text-muted"}`}>days</span></button>; })}</div>
+              </div>
+            </div>
           </div>)}
-        {f.outcome === "callback" && <div className="pop"><Choice value={f.days} onChange={set("days")} aria-label="Remind me" className="w-auto" options={["2", "7", "14", "30"].map((d) => ({ value: d, label: `Remind me in ${d} days` }))} /></div>}
-        {f.outcome === "notInterested" && <div className="pop"><Choice value={f.reason} onChange={set("reason")} aria-label="Reason" className="w-auto" options={["Already chose a supplier", "Project on hold", "Price expectations too low", "Wants a local firm", "No lifts planned"]} /></div>}
-        <Btn disabled={!ok} onClick={save}>Save the conversation</Btn>
-        {!ok && <p className="t-small">Write what was said and pick what happens next{f.outcome === "tender" ? ", and attach the tender document" : ""}.</p>}
+        {f.outcome === "callback" && (
+          <div className="pop overflow-hidden rounded-xl border border-line bg-white">
+            <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5 text-[12.5px] font-semibold"><span className="text-amber-700"><Icon n="clock" s={14} /></span>Remind me to call back</div>
+            <div className="grid grid-cols-4 gap-2 p-4">{["2", "7", "14", "30"].map((d) => { const on = f.days === d; return <button key={d} type="button" aria-pressed={on} onClick={() => set("days")(d)} className={`rounded-lg border py-2 text-center transition ${on ? "border-brand bg-brand text-white" : "border-line bg-white hover:bg-surface"}`}><span className="num block text-[17px] font-semibold leading-none">{d}</span><span className={`text-[11px] ${on ? "text-white/80" : "text-muted"}`}>days</span></button>; })}</div>
+          </div>)}
+        {f.outcome === "notInterested" && (
+          <div className="pop overflow-hidden rounded-xl border border-line bg-white">
+            <div className="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5 text-[12.5px] font-semibold"><span className="text-red-700"><Icon n="x" s={14} /></span>Why are they not interested?</div>
+            <div className="flex flex-wrap gap-2 p-4">{["Already chose a supplier", "Project on hold", "Price expectations too low", "Wants a local firm", "No lifts planned"].map((r) => { const on = f.reason === r; return <button key={r} type="button" aria-pressed={on} onClick={() => set("reason")(r)} className={`rounded-full border px-3 py-1.5 text-[13px] font-medium transition ${on ? "border-brand bg-brand text-white" : "border-line bg-white hover:bg-surface"}`}>{r}</button>; })}</div>
+          </div>)}
+        {(() => {
+          const out = OUTCOMES.find((x) => x.k === f.outcome);
+          const steps: [string, boolean][] = [["What was said", !!f.said.trim()], ["Who you spoke to", f.outcome === "callback" || !!f.name], ["Next step", !!f.outcome], ...(f.outcome === "tender" ? ([["Tender document", !!f.file]] as [string, boolean][]) : [])];
+          return (
+            <div className="rounded-xl border border-line bg-surface/60 p-3">
+              <div className="flex flex-wrap gap-1.5">{steps.map(([l, done]) => <span key={l} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium ${done ? "bg-emerald-100 text-emerald-800" : "bg-white text-muted ring-1 ring-line"}`}>{done ? <Icon n="check" s={11} w={3} /> : <span className="h-2 w-2 rounded-full border border-current" />}{l}</span>)}</div>
+              <button type="button" disabled={!ok} onClick={save} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-brand bg-brand px-4 text-[14px] font-semibold text-white transition hover:border-brand-dark hover:bg-brand-dark disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-200 disabled:text-zinc-500"><Icon n="check" s={15} w={2.5} />{out ? out.cta : "Save the conversation"}</button>
+            </div>);
+        })()}
       </div>
     </Panel>
   );
@@ -335,5 +387,66 @@ export function Talks({ o }: { o: Opp }) {
           <p className="mt-1 t-small">{NAMES[t.by] ?? t.by} · {ago(now - t.at)}</p>
         </li>))}</ol>
     </Card>
+  );
+}
+
+/* ---------------- after the order: the account manager and the other reps ---------------- */
+const LINE_INFO: { k: "ni" | "ei" | "sc" | "mod"; label: string; icon: string }[] = [
+  { k: "ni", label: "New installation", icon: "layers" }, { k: "ei", label: "Existing lifts", icon: "gear" }, { k: "sc", label: "Service contract", icon: "shield" }, { k: "mod", label: "Modernisation", icon: "bolt" },
+];
+
+export function AccountUpdatePanel({ o, t }: { o: Opp; t: Task }) {
+  const { s, me, mutate } = useApp();
+  const acc = accountOf(s, o.accountId) ?? s.sherpa.accounts.find((a) => a.name === o.placeName);
+  const lines = acc?.lines ?? { ni: false, ei: false, sc: false, mod: false };
+  const [send, setSend] = useState<("ei" | "mod")[]>([]); const [note, setNote] = useState("");
+  const toggle = (k: "ei" | "mod") => setSend((x) => (x.includes(k) ? x.filter((y) => y !== k) : [...x, k]));
+  const offering = s.sherpa.tasks.some((x) => !x.done && x.oppId === o.id && x.kind === "handover");
+  const options: { k: "ei" | "mod"; title: string; text: string }[] = [
+    { k: "ei", title: "Existing lifts", text: "Other lifts at this customer that need service or repair." },
+    { k: "mod", title: "Modernisation", text: "Older units here that could be modernised." },
+  ];
+  return (
+    <Panel title={t.title} why={t.detail ?? ""} does="Saves what you know on the account and sends a handover pack to each rep you pick." then="Each rep gets a to-do with the customer, the lifts and the order, and drafts their own offer.">
+      <div className="mb-4 rounded-xl border border-line bg-white p-3">
+        <div className="flex items-center justify-between gap-2"><b className="text-[14px]">{acc?.name ?? o.placeName}</b>{acc ? <span className="t-small">Last contact {ago(Date.now() + s.clock - acc.lastActivity)}</span> : <span className="t-small">New customer record</span>}</div>
+        <div className="mt-2.5 grid grid-cols-2 gap-2 @xl:grid-cols-4">{LINE_INFO.map((l) => { const on = lines[l.k] || send.includes(l.k as "ei" | "mod") || (l.k === "sc" && offering); const state = l.k === "ni" ? "Just sold" : l.k === "sc" && offering ? "Being offered" : send.includes(l.k as "ei" | "mod") ? "Handing over" : lines[l.k] ? "Active" : "Not yet"; return (
+          <div key={l.k} className={`rounded-lg border px-2.5 py-2 ${on ? "border-emerald-200 bg-emerald-50" : "border-dashed border-line bg-surface/60"}`}><span className={`grid h-7 w-7 place-items-center rounded-md ${on ? "bg-white text-emerald-700" : "bg-white text-muted"}`}><Icon n={l.icon} s={14} /></span><div className="mt-1.5 text-[12.5px] font-semibold leading-tight">{l.label}</div><div className={`text-[11.5px] ${on ? "text-emerald-800" : "text-muted"}`}>{state}</div></div>); })}</div>
+      </div>
+      <div className="text-[13px] font-semibold">What else could other teams sell here?</div>
+      <div className="mt-1.5 grid grid-cols-1 gap-2 @xl:grid-cols-2">{options.map((x) => { const to = s.cfg.owners[o.area]?.[x.k.toUpperCase() as "EI" | "MOD"]; const on = send.includes(x.k); const had = !!lines[x.k]; return (
+        <button key={x.k} type="button" disabled={had || !to} aria-pressed={on} onClick={() => toggle(x.k)} className={`relative rounded-xl border p-3 pr-9 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${on ? "border-brand bg-brand-soft/60" : "border-line bg-white hover:bg-surface"}`}>
+          <b className="block text-[13.5px]">{x.title}</b><span className="text-[12.5px] text-muted">{had ? "Already being worked on." : x.text}</span>{to && !had && <span className="mt-1.5 block text-[12px] font-medium">Send to {NAMES[to]}</span>}
+          <span className={`absolute right-3 top-3 grid h-5 w-5 place-items-center rounded-md border-2 ${on ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{on && <Icon n="check" s={11} w={3.5} />}</span>
+        </button>); })}</div>
+      <div className="mt-3"><div className="mb-1.5 text-[13px] font-semibold">Note for the account <span className="font-normal text-muted">(optional)</span></div><Field v={note} set={setNote} ph="e.g. Developer plans two more towers next year. Contact prefers WhatsApp." area /></div>
+      <button type="button" onClick={() => mutate((st) => OP.updateAccount(st, t.id, me!.id, { handovers: send, note }))} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-brand bg-brand px-4 text-[14px] font-semibold text-white transition hover:border-brand-dark hover:bg-brand-dark @md:w-auto"><Icon n="check" s={15} w={2.5} />{send.length ? `Update the account and send ${send.length} handover${send.length > 1 ? "s" : ""}` : "Update the account"}</button>
+    </Panel>
+  );
+}
+
+export function HandoverOfferPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: string) => void }) {
+  const { s, me, mutate } = useApp();
+  const acc = accountOf(s, o.accountId) ?? s.sherpa.accounts.find((a) => a.name === o.placeName);
+  const defaultProduct: ProductKey = /\bMOD\b/i.test(t.title) ? "modernisation" : "maintenance";
+  const [product, setProduct] = useState<ProductKey>(defaultProduct); const [term, setTerm] = useState(3); const [disc, setDisc] = useState(0);
+  const yearly = PRODUCT[product].yearly; const termUsed = yearly ? term : 1;
+  const list = listPrice(o.area, product, termUsed); const price = Math.round(list * (1 - disc / 100));
+  const pill = (on: boolean) => `rounded-lg border px-3 py-2 text-center text-[13px] font-semibold transition ${on ? "border-brand bg-brand text-white" : "border-line bg-white hover:bg-surface"}`;
+  return (
+    <Panel title={t.title} why={t.detail ?? ""} does="Drafts an offer for this customer, priced from the area price list. It becomes your own opportunity." then="You review the draft, get any approval it needs, and send it to the customer.">
+      <div className="mb-4 flex items-center gap-3 rounded-xl bg-surface px-3 py-2.5 text-[13px]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-ink"><Icon n="users" s={17} /></span><span className="min-w-0"><b className="block truncate">{acc?.name ?? o.placeName}</b><span className="text-muted">{AREA_NAME[o.area] ?? o.area} · order {o.order?.number ?? "placed"}{acc ? ` · ${acc.contact.name}` : ""}</span></span></div>
+      <div className="space-y-4">
+        <div><div className="mb-1.5 text-[13px] font-semibold">What do you offer?</div><div className="grid grid-cols-2 gap-2">{(["maintenance", "modernisation"] as ProductKey[]).map((p) => <button key={p} type="button" aria-pressed={product === p} onClick={() => setProduct(p)} className={pill(product === p)}>{PRODUCT[p].label}</button>)}</div></div>
+        {yearly && <div><div className="mb-1.5 text-[13px] font-semibold">For how long?</div><div className="grid grid-cols-3 gap-2">{[1, 3, 5].map((y) => <button key={y} type="button" aria-pressed={term === y} onClick={() => setTerm(y)} className={pill(term === y)}><span className="num text-[16px]">{y}</span> <span className="text-[11.5px] font-medium opacity-80">year{y > 1 ? "s" : ""}</span></button>)}</div></div>}
+        <div><div className="mb-1.5 text-[13px] font-semibold">Discount</div><div className="grid grid-cols-4 gap-2">{[0, 5, 10, 15].map((d) => <button key={d} type="button" aria-pressed={disc === d} onClick={() => setDisc(d)} className={pill(disc === d)}>{d}%</button>)}</div>{disc > 10 && <p className="mt-1.5 text-xs text-amber-800">Above 10% the Sales Manager has to approve before it is sent.</p>}</div>
+        <div className="overflow-hidden rounded-xl border border-line text-[13px]">
+          <div className="flex justify-between px-3 py-2"><span className="text-muted">List price{yearly ? ` · ${termUsed} year${termUsed > 1 ? "s" : ""}` : ""}</span><span className="num">{inr(list)}</span></div>
+          <div className="flex justify-between border-t border-line px-3 py-2"><span className="text-muted">Discount {disc}%</span><span className="num">− {inr(list - price)}</span></div>
+          <div className="flex justify-between border-t border-line bg-brand-soft/50 px-3 py-2.5"><b>Offer price</b><b className="num text-[15px]">{inr(price)}</b></div>
+        </div>
+        <button type="button" onClick={() => { let id: string | undefined; mutate((st) => { id = OP.offerHandover(st, t.id, me!.id, { product, term: termUsed, discountPct: disc })?.id; }); if (id) openOffer(id); }} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-brand bg-brand px-4 text-[14px] font-semibold text-white transition hover:border-brand-dark hover:bg-brand-dark @md:w-auto"><Icon n="send" s={15} />Draft the offer</button>
+      </div>
+    </Panel>
   );
 }

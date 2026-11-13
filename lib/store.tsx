@@ -752,10 +752,25 @@ export function pointsOf(s: State, userId: string) {
   s.reports.filter((r) => r.reporterId === userId).forEach((r) => r.points.forEach((p) => { if (p.status === "confirmed") confirmed += p.pts; else if (p.status === "pending" || p.status === "held") pending += p.pts; }));
   return { confirmed, pending };
 }
+/** Most recent activity on a report: creation, any timeline entry, or any action on its items. */
+export function reportActivity(r: Report): number {
+  let t = r.createdAt;
+  for (const e of r.timeline) if (e.t > t) t = e.t;
+  for (const it of r.items) { t = Math.max(t, it.createdAt, it.lastActionAt); for (const l of it.log) if (l.t > t) t = l.t; }
+  return t;
+}
+/** Most recent activity on a single item. */
+export function itemActivity(it: Item): number {
+  let t = Math.max(it.createdAt, it.lastActionAt);
+  for (const l of it.log) if (l.t > t) t = l.t;
+  return t;
+}
+/** Newest-activity-first comparator for { r, it } rows. */
+export const byRecent = (a: { r: Report; it: Item }, b: { r: Report; it: Item }) => Math.max(itemActivity(b.it), b.r.createdAt) - Math.max(itemActivity(a.it), a.r.createdAt);
 export function itemsFor(s: State, user: { id: string; team?: Team }) {
   const out: { r: Report; it: Item }[] = [];
   s.reports.forEach((r) => { if (r.status !== "sent") return; r.items.forEach((it) => { if (it.ownerId === user.id || (!it.ownerId && user.team && it.team === user.team)) out.push({ r, it }); }); });
-  return out;
+  return out.sort(byRecent);
 }
 export function exceptions(s: State) {
   const now = nowOf(s); const ex: { r: Report; it: Item; why: string }[] = [];
