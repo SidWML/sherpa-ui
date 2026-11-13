@@ -2,11 +2,16 @@
    mock CRM, and the next-best-action engine for all 27 NBAs. Everything is deterministic rules. There is no AI here: the chat and the
    cards only dress these results up. */
 import { USERS } from "./data";
-import type { Account, Alert, Asset, Campaign, MLead, Offer, Opp, OppStage, Past, ProductKey, Report, Sherpa, State, Task, TaskKind, Tender, User } from "./types";
+import { tierOf } from "./engine";
+import { CT } from "./contracts";
+import { unitHealth } from "./scores";
+import type { Account, Agreement, Alert, Asset, Campaign, ChatMsg, Config, Finding, MLead, Offer, Opp, OppStage, Past, ProductKey, QuoteBrief, Reason, Report, Sherpa, SiteVisit, State, Talk, Task, TaskKind, Tender, TenderDoc, User } from "./types";
 
 export const DAY = 86400000;
 export const HOUR = 3600000;
 export const nowS = (s: State) => Date.now() + s.clock;
+/** Set by the store: closes the Snap & Lead item behind a deal, so the reporter sees the result and gets the points. Kept as a hook to avoid an import cycle. */
+export const leadHooks: { closed?: (s: State, itemId: string, by: string, result: "won" | "lost") => void; quoted?: (s: State, itemId: string, by: string) => void } = {};
 
 export const PRODUCT: Record<ProductKey, { label: string; yearly: boolean; list: number; agent: string }> = {
   renewal: { label: "Service contract renewal", yearly: true, list: 145000, agent: "Proposal Generator" },
@@ -20,11 +25,12 @@ export const FACTOR: Record<string, number> = { HYW: 1, HYC: 0.98, SEC: 0.93, WG
 export const AREA_NAME: Record<string, string> = { HYW: "Hyderabad West", HYC: "Hyderabad Central", SEC: "Secunderabad and East", WGL: "Warangal", OUT: "outside Telangana" };
 export const GUIDE = { seller: 10, manager: 20 };
 export const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+export const inrShort = (n: number) => (n >= 1e7 ? `₹${(n / 1e7).toFixed(1)} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(1)} L` : inr(n));
 export const chf = inr; // kept so older imports keep working
 
 export const listPrice = (area: string, product: ProductKey, term: number) => Math.round(PRODUCT[product].list * (FACTOR[area] ?? 1) * (PRODUCT[product].yearly ? term : 1));
 /** Up to 10% the seller sends alone. Up to 20% the sales manager approves. Above 20% is outside this app: it needs the regional lead in writing. */
-export const approversFor = (pct: number): string[] => (pct <= GUIDE.seller ? [] : pct <= GUIDE.manager ? ["marc"] : []);
+export const approversFor = (pct: number, cfg?: Pick<Config, "approveAll">): string[] => (pct > GUIDE.manager ? [] : pct > GUIDE.seller || (cfg?.approveAll ?? true) ? ["marc"] : []);
 export const aboveLimit = (pct: number) => pct > GUIDE.manager;
 export const MANAGER = "marc"; export const SUPPORT = "shalini";
 /** The papers a tender bid usually needs. The Sales Manager builds the bid from these. */
@@ -50,12 +56,13 @@ export function regionRef(s: State, area: string, product: ProductKey): RegionRe
   const n = all.length; const prices = all.map((p) => p.price); const wins = all.filter((p) => p.outcome === "won").length;
   return { area, sells, count: n, avg: n ? prices.reduce((a, b) => a + b, 0) / n : 0, min: n ? Math.min(...prices) : 0, max: n ? Math.max(...prices) : 0, avgDiscount: n ? all.reduce((a, p) => a + p.discountPct, 0) / n : 0, wins, winRate: n ? Math.round((wins / n) * 100) : 0 };
 }
-export function winChance(s: State, area: string, product: ProductKey, pct: number) {
+export function winChanceWhy(s: State, area: string, product: ProductKey, pct: number) {
   const base = s.sherpa.past.filter((p) => p.area === area && p.product === product);
   const near = base.filter((p) => Math.abs(p.discountPct - pct) <= 6);
-  const set = near.length >= 3 ? near : base;
-  return set.length ? Math.round((set.filter((p) => p.outcome === "won").length / set.length) * 100) : 0;
+  const close = near.length >= 3; const set = close ? near : base; const won = set.filter((p) => p.outcome === "won").length;
+  return { pct: set.length ? Math.round((won / set.length) * 100) : 0, won, n: set.length, close, lo: Math.max(0, pct - 6), hi: pct + 6 };
 }
+export const winChance = (s: State, area: string, product: ProductKey, pct: number) => winChanceWhy(s, area, product, pct).pct;
 export function variantsFor(product: ProductKey) {
   return PRODUCT[product].yearly
     ? [{ key: "A", label: "1 year, list price", term: 1, disc: 0 }, { key: "B", label: "3 years, 8% off", term: 3, disc: 8 }, { key: "C", label: "5 years, 15% off", term: 5, disc: 15 }]
@@ -99,7 +106,7 @@ export function seedSherpa(): Sherpa {
     ast("a77300", "deccan", "techpark", "Lift 77300 · Deccan Tech Park, Tower 3", "Schindler 3100", 14, { owner: "ethan", contractEnd: now + 240 * DAY, contractValue: 132000, callbacks90d: 3, callbacksPrev90d: 2, faults90d: 2, health: 66, techNote: "Technician visit 3 Nov: door roller worn on landings 2 and 5. Replace 4 rollers and re-align the door sill." }),
     ast("a74820", "cyber", "riverside", "Lift 74820 · Cyber Gateway, Tower A", "Schindler 3300", 9, { owner: "ethan", contractEnd: now + 200 * DAY, contractValue: 130000, callbacks14d: 1, callbacks90d: 2, callbacksPrev90d: 1, faults90d: 1, health: 82 }),
     ast("a75110", "cyber", "riverside", "Lift 75110 · Cyber Gateway, Tower B", "Schindler 3300", 11, { owner: "ethan", contractEnd: now + 160 * DAY, contractValue: 135000, callbacks90d: 8, callbacksPrev90d: 5, faults90d: 2, health: 61 }),
-    ast("a90311", "kakatiya", "baselhosp", "Lift 90311 · Kakatiya Medical Centre", "Schindler 5500", 15, { owner: "ethan", sc: "sofia", contractEnd: now + 70 * DAY, contractValue: 210000, callbacks90d: 7, callbacksPrev90d: 3, faults90d: 2, health: 41 }),
+    ast("a90311", "kakatiya", "baselhosp", "Lift 90311 · Kakatiya Medical Centre", "Schindler 5500", 15, { owner: "ethan", sc: "sofia", contractEnd: now + 70 * DAY, contractValue: 210000, callbacks90d: 8, callbacksPrev90d: 3, faults90d: 2, health: 41 }),
     ast("a61102", "banjara", "citymall", "Lift 61102 · Banjara Central Mall, Block B", "Schindler 3100", 27, { owner: "elias", mod: "mia", contractEnd: now + 300 * DAY, contractValue: 152000, callbacks90d: 6, callbacksPrev90d: 6, faults90d: 5, health: 55, obsolete: "Door operator board DO-31 is discontinued. Last-time buy closes in 6 months." }),
     ast("a82010", "banjara", "citymall", "Lift 82010 · Banjara Central Mall, Block A", "Schindler 3300", 21, { owner: "elias", mod: "mia", contractEnd: now + 150 * DAY, contractValue: 140000, callbacks90d: 4, callbacksPrev90d: 3, faults90d: 2, obr: 6, health: 58 }),
     ast("a50113", "banjara", "citymall", "Lift 50113 · Banjara Central Mall, Block D", "Schindler 3100", 22, { owner: "elias", contractEnd: now + 400 * DAY, contractValue: 128000, health: 70 }),
@@ -107,6 +114,7 @@ export function seedSherpa(): Sherpa {
     ast("a50112", "tsic", "cityhall", "Lift 50112 · Secretariat Annexe", "Schindler 3100", 26, { owner: "elias", mod: "mia", contractEnd: now + 350 * DAY, contractValue: 125000, health: 62 }),
     ast("a50111", "secbiz", "secbiz", "Lift 50111 · Secunderabad Business Hub", "Schindler 3300", 24, { owner: "elias", contractEnd: now + 420 * DAY, contractValue: 126000, health: 72 }),
   ];
+  assets.forEach((a) => { a.health = unitHealth(a).score; });
   const tender = (id: string, name: string, accountId: string, area: string, owner: string, line: Tender["line"], stage: Tender["stage"], eordDays: number, lifts: number, summary: string, o: Partial<Tender> = {}): Tender =>
     ({ id, name, accountId, area, owner, line, stage, eord: now + eordDays * DAY, value: lifts * PRODUCT.newinstall.list, lifts, summary, discovered: now - 12 * DAY, checklist: PAPER_LIST(), ...o });
   const tenders: Tender[] = [
@@ -136,14 +144,32 @@ export function seedSherpa(): Sherpa {
     { id: "ML-503", name: "Nizam Boutique Hotel", source: "Trade fair QR code", area: "SEC", createdAt: now - 20 * HOUR, status: "new", interest: "Maintenance contract", score: 58 },
   ];
   const campaigns: Campaign[] = [{ id: "C-1", name: "Keep your lift safe: AMC for lifts over 20 years", segment: "Ageing lifts, Hyderabad Central", area: "HYC", size: 9, status: "live", createdBy: "manoj", createdAt: now - 18 * DAY, leads: 3 }];
-  const sh: Sherpa = { accounts, assets, tenders, opps: [], past: seedPast(now), offers, mleads, campaigns, tasks: [], crm: [], nba: {}, flags: { coaching: false }, seq: 913 };
+  const sh: Sherpa = { accounts, assets, tenders, opps: [], past: seedPast(now), offers, mleads, campaigns, tasks: [], contracts: [], crm: [], nba: {}, flags: { coaching: false }, seq: 913 };
   seedOpps(sh, now);
   return sh;
 }
 
 /* ------------------------------------------------------------------ the opportunity: one record from sighting to won */
 export const KIND_LABEL: Record<Opp["kind"], string> = { newbuild: "New installation", existing: "Existing installation", renewal: "Service contract", modernisation: "Modernisation", project: "Project" };
-export const STAGES: [OppStage, string][] = [["new", "Lead"], ["contact", "Contact"], ["visit", "Visit"], ["qualify", "Qualify"], ["bid", "Bid"], ["offer", "Offer"], ["sent", "Sent"], ["won", "Won"]];
+export const STAGES: [OppStage, string][] = [["review", "Review"], ["new", "Lead"], ["contact", "Contact"], ["visit", "Visit"], ["qualify", "Qualify"], ["bid", "Bid"], ["offer", "Offer"], ["sent", "Sent"], ["contract", "Contract"], ["order", "Order"], ["won", "Won"]];
+/** A Snap & Lead lead skips the accept and contact steps: the manager reviews it and a technician visits. */
+export const isNI = (o: Pick<Opp, "kind">) => o.kind === "newbuild" || o.kind === "project";
+export const NI_STAGES = (o: Opp): [OppStage, string][] => [["review", "Review"], ["new", "Accept"], ["contact", "Customer call"], o.tenderId ? ["bid", "Bid"] : ["offer", "Quote"], ["sent", "Sent"], ["order", "Order"], ["won", "Won"]];
+export function stagesFor(o: Opp): [OppStage, string][] {
+  if (isNI(o)) return NI_STAGES(o);
+  if (o.source.type !== "snap" || o.stage === "new" || o.stage === "contact") return STAGES.filter(([k]) => k !== "review");
+  const deal: OppStage = o.tenderId ? "bid" : "offer";
+  return STAGES.filter(([k]) => k !== "new" && k !== "contact" && (k === deal || (k !== "bid" && k !== "offer")));
+}
+export const TECHS = USERS.filter((u) => u.role === "tech");
+export const SERVICE_LEADS = USERS.filter((u) => u.role === "sl");
+export const serviceLeadFor = (area: string) => SERVICE_LEADS.find((u) => u.areas?.includes(area))?.id ?? SERVICE_LEADS[0]?.id;
+/** Why we lost this customer or place last time, so the next deal starts with it. */
+export function lastLoss(s: State, o: Opp): { reason: string; at: number; title: string } | undefined {
+  const prev = s.sherpa.opps.filter((x) => x.id !== o.id && x.lostReason && x.closedAt && ((o.accountId && x.accountId === o.accountId) || x.placeName === o.placeName)).sort((a, b) => b.closedAt! - a.closedAt!)[0];
+  return prev ? { reason: prev.lostReason!, at: prev.closedAt!, title: prev.title } : undefined;
+}
+export const techFor = (area: string) => TECHS.find((u) => u.areas?.includes(area))?.id ?? TECHS[0]?.id;
 export const oppOf = (s: State, id?: string) => s.sherpa.opps.find((o) => o.id === id);
 export const oppOfOffer = (s: State, o: Offer) => s.sherpa.opps.find((x) => x.id === o.oppId);
 export const tasksOfOpp = (s: State, oppId: string, open = true) => s.sherpa.tasks.filter((t) => t.oppId === oppId && (!open || !t.done));
@@ -155,12 +181,13 @@ export function addTask(s: State, t: { oppId?: string; forUser: string; by: stri
   if (t.forUser !== t.by) ping(s, t.forUser, `${NAMES[t.by] ?? t.by} needs you: ${t.title}`);
   return task;
 }
-function closeTasks(s: State, oppId: string | undefined, kinds: TaskKind[] | null, result?: string) {
+export function closeTasks(s: State, oppId: string | undefined, kinds: TaskKind[] | null, result?: string) {
   s.sherpa.tasks.forEach((t) => { if (oppId && t.oppId === oppId && !t.done && (!kinds || (t.kind && kinds.includes(t.kind)))) { t.done = true; t.doneAt = nowS(s); if (result) t.result = result; } });
 }
-const olog = (s: State, o: Opp, by: string, text: string) => { o.log.push({ t: nowS(s), by: NAMES[by] ?? by, text }); };
+export const olog = (s: State, o: Opp, by: string, text: string) => { o.log.push({ t: nowS(s), by: NAMES[by] ?? by, text }); };
 /** Who goes to the customer: the owner, except a modernisation survey (the MOD rep) and a service-contract renewal (the EI rep for the area). */
 export function visitorFor(s: State, o: Opp): string {
+  if (o.technician) return o.technician;
   if (o.kind === "modernisation") return "mia";
   if (o.kind === "renewal") return s.cfg.owners[o.area]?.EI ?? o.owner;
   return o.owner;
@@ -178,20 +205,74 @@ export const OP = {
   fromReport(s: State, r: Report) {
     r.items.filter((i) => i.kind === "lead" && !i.silent && i.team !== "AM").forEach((i) => {
       if (s.sherpa.opps.some((x) => x.source.itemId === i.id)) return;
-      const unrouted = !i.ownerId; const owner = i.ownerId ?? MANAGER;
       const acc = s.sherpa.accounts.find((a) => a.placeIds.includes(r.placeId));
       const contact = r.extras.contact ? { name: r.extras.contact.split("·")[0].trim(), role: "Given by the reporter", phone: r.extras.contact.split("·")[1]?.trim(), via: "the reporter" } : undefined;
-      const kind = kindOfTeam(i.team); const opp = OP.create(s, { title: `${KIND_LABEL[kind]}: ${r.placeName}`, kind, accountId: acc?.id, placeName: r.placeName, area: r.area, owner, source: { type: "snap", reportId: r.id, itemId: i.id, reporter: r.reporterId, label: `Snap & Lead ${r.id}` }, contact, unrouted });
-      if (unrouted) addTask(s, { oppId: opp.id, forUser: MANAGER, by: r.reporterId, title: `Assign an owner: no one covers ${AREA_NAME[r.area] ?? r.area}`, detail: `${i.title} at ${r.placeName}. The area has no owner for this team.`, days: 1, kind: "assign", source: "H2" });
-      else addTask(s, { oppId: opp.id, forUser: owner, by: r.reporterId, title: `Accept: ${opp.title}`, detail: i.summary, days: i.tier === "Hot" ? 1 : 3, kind: "accept", source: "Snap & Lead" });
+      const kind = kindOfTeam(i.team);
+      const opp = OP.create(s, { title: `${KIND_LABEL[kind]}: ${r.placeName}`, kind, accountId: acc?.id, placeName: r.placeName, area: r.area, owner: MANAGER, source: { type: "snap", reportId: r.id, itemId: i.id, reporter: r.reporterId, label: `Snap & Lead ${r.id}` }, contact, stage: "review" });
+      opp.suggested = i.ownerId;
+      const hist = historyReasons(s, opp, r.placeId);
+      opp.reasons = [...i.reasons, ...hist];
+      opp.score = Math.max(0, Math.min(100, i.score + hist.reduce((a, b) => a + b.pts, 0)));
+      opp.tier = i.score === 0 ? i.tier : tierOf(opp.score, s.cfg);
+      addTask(s, { oppId: opp.id, forUser: MANAGER, by: r.reporterId, title: `Review: ${opp.title}`, detail: `${opp.tier} lead, score ${opp.score}. ${i.summary}${i.ownerId ? "" : ` No ${i.team} owner covers ${AREA_NAME[r.area] ?? r.area}.`}`, days: opp.tier === "Hot" ? 1 : 2, kind: "review", source: "Snap & Lead" });
     });
+  },
+  /** The Sales Manager decided to pursue: names the owner, and for leads other than new installations the technician who visits. */
+  review(s: State, id: string, by: string, p: { owner: string; technician?: string; note?: string }) {
+    const o = oppOf(s, id); if (!o || o.stage !== "review") return;
+    closeTasks(s, id, ["review", "assign"]);
+    if (isNI(o) || !p.technician) {
+      o.owner = p.owner; o.unrouted = false; o.stage = "new";
+      olog(s, o, by, `Pursue. Owner ${NAMES[p.owner] ?? p.owner}${p.note ? `. ${p.note}` : ""}`);
+      if (p.note) OP.note(s, id, by, p.note);
+      addTask(s, { oppId: id, forUser: p.owner, by, title: `Accept: ${o.title}`, detail: `${NAMES[by]} decided to pursue this ${o.tier ? `${o.tier} ` : ""}lead and picked you.`, days: 1, kind: "accept", source: "Lead review" });
+      if (p.owner !== by) ping(s, p.owner, `${NAMES[by]} gave you ${o.title}. Accept it to start.`);
+      return;
+    }
+    const technician = p.technician;
+    o.owner = p.owner; o.unrouted = false; o.technician = technician; o.visitBy = technician; o.stage = "visit";
+    olog(s, o, by, `Pursue. Owner ${NAMES[p.owner] ?? p.owner}, site visit by ${NAMES[technician] ?? technician}${p.note ? `. ${p.note}` : ""}`);
+    if (p.note) OP.note(s, id, by, p.note);
+    addTask(s, { oppId: id, forUser: technician, by, title: `Site visit: ${o.placeName}`, detail: `${KIND_LABEL[o.kind]} lead${o.tier ? ` (${o.tier})` : ""}. Meet the person in charge, check the lifts and file the site-visit report. ${NAMES[p.owner]} owns the deal.`, days: o.tier === "Hot" ? 2 : 5, kind: "siteVisit", source: "Lead review" });
+    if (p.owner !== by) ping(s, p.owner, `${NAMES[by]} gave you ${o.title}. ${NAMES[technician]} visits first.`);
+  },
+  reviewClose(s: State, id: string, by: string, reason: string) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, null, reason); o.stage = "closed"; o.closedAt = nowS(s); o.lostReason = `Not pursued: ${reason}`; olog(s, o, by, `Not pursued: ${reason}`);
+  },
+  note(s: State, id: string, by: string, text: string) {
+    const o = oppOf(s, id); if (!o || !text.trim()) return;
+    const stage = STAGES.find((x) => x[0] === o.stage)?.[1] ?? o.stage;
+    (o.notes ??= []).push({ t: nowS(s), by: NAMES[by] ?? by, text: `${stage}: ${text.trim()}` });
+  },
+  /** The technician filed the site-visit report. The owner sets up the deal next. */
+  siteVisit(s: State, id: string, by: string, v: Omit<SiteVisit, "by" | "at">) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, ["siteVisit", "visit"]);
+    o.site = { ...v, by, at: nowS(s) }; o.visited = true; o.stage = "qualify";
+    if (v.met.name) o.contact = { name: v.met.name, role: v.met.role, phone: v.met.phone, via: `${NAMES[by] ?? by} on the site visit` };
+    olog(s, o, by, `Site visit done${v.met.name ? `: met ${v.met.name}, ${v.met.role}` : ""}`);
+    if (v.note) OP.note(s, id, by, v.note);
+    const next = o.kind === "newbuild" || o.kind === "project" ? "tender or quotation?" : o.kind === "modernisation" ? "modernisation quotation" : "maintenance offer";
+    addTask(s, { oppId: id, forUser: o.owner, by, title: `Set up the deal for ${o.placeName}`, detail: `${NAMES[by]} visited. Confirm the customer, then pick the path: ${next}`, days: 2, kind: "dealSetup", source: "Site visit" });
+  },
+  /** The owner confirmed the customer and picked the path. */
+  setupDeal(s: State, id: string, by: string, p: { accountId: string | "new"; path: "tender" | "direct" | "notfit"; eordDays?: number; product?: ProductKey; term?: number; discountPct?: number; nba?: string }) {
+    const o = oppOf(s, id); if (!o) return;
+    if (p.path !== "notfit") {
+      const acc = p.accountId === "new" ? newAccountFor(s, o) : accountOf(s, p.accountId);
+      if (acc) { o.accountId = acc.id; olog(s, o, by, p.accountId === "new" ? `New customer created: ${acc.name}` : `Linked to existing customer ${acc.name}`); }
+    }
+    closeTasks(s, id, ["dealSetup"]);
+    OP.qualify(s, id, by, p.path, p.eordDays ?? 30, { product: p.product, term: p.term, discountPct: p.discountPct });
+    if (p.nba) olog(s, o, by, `Next best action taken: ${p.nba}`);
   },
   /** The owner accepted. Next: a contact. If none is known, the owner decides how to find one. */
   accepted(s: State, id: string, by: string) {
     const o = oppOf(s, id); if (!o || o.stage !== "new") return;
     closeTasks(s, id, ["accept", "assign"]); o.stage = "contact"; olog(s, o, by, "Accepted. The reporter was told");
     if (o.contact) addTask(s, { oppId: id, forUser: o.owner, by, title: `Contact ${o.contact.name} about ${o.placeName}`, days: 2, kind: "contact" });
-    else addTask(s, { oppId: id, forUser: o.owner, by, title: `Find a decision-maker for ${o.placeName}`, detail: "We have no contact. Ask the reporter, ask Sales support to research it, or walk in yourself.", days: 2, kind: "findContact" });
+    else addTask(s, { oppId: id, forUser: o.owner, by, title: `Find a decision-maker for ${o.placeName}`, detail: isNI(o) ? "We have no contact. Ask Sales support to search the records, ask the person who spotted it, or find them yourself." : "We have no contact. Ask the reporter, ask Sales support to research it, or walk in yourself.", days: 2, kind: "findContact" });
   },
   askReporter(s: State, id: string, by: string) {
     const o = oppOf(s, id); const rep = o?.source.reporter; if (!o || !rep || rep === o.owner) return;
@@ -199,11 +280,54 @@ export const OP = {
     addTask(s, { oppId: id, forUser: rep, by, title: `Add the contact for ${o.placeName}`, detail: "Look at the hoarding or the notice board. Note the developer or contractor name and any phone number. +5 points.", days: 2, kind: "research", source: "contact" });
     olog(s, o, by, `Asked ${NAMES[rep]} (who reported it) for the developer name and phone`);
   },
-  research(s: State, id: string, by: string) {
+  research(s: State, id: string, by: string, want: string[] = ["Contact details"]) {
     const o = oppOf(s, id); if (!o) return;
     closeTasks(s, id, ["findContact"]);
-    addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Find the decision-maker for ${o.placeName}`, detail: `${o.title}. Use the building permit, the company register and our CRM. Return a name, role and phone or email.`, days: 2, kind: "research", source: "contact" });
-    olog(s, o, by, "Asked Sales support to research the contact");
+    o.research = { want, by, at: nowS(s) };
+    addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Find ${want.map((w) => w.toLowerCase()).join(", ")} for ${o.placeName}`, detail: `${NAMES[by]} asked for: ${want.join(", ")}. Search the building permit, the company register and our customer records, then share what fits. Do not call the customer.`, days: 2, kind: "research", source: "contact" });
+    olog(s, o, by, `Asked Sales support to find: ${want.join(", ")}`);
+  },
+  /** Sales support shares what the records search found. The first contact picked becomes the deal's contact. */
+  shareResearch(s: State, taskId: string, by: string, ids: string[]) {
+    const t = s.sherpa.tasks.find((x) => x.id === taskId); const o = oppOf(s, t?.oppId); if (!t || !o) return;
+    const picked = researchFindings(s, o).filter((f) => ids.includes(f.id)); const c = picked.find((f) => f.contact)?.contact; if (!c) return;
+    t.done = true; t.doneAt = nowS(s); t.result = picked.map((f) => f.title).join("; ");
+    o.research = { ...(o.research ?? { want: [], by: o.owner, at: nowS(s) }), shared: picked.map((f) => `${f.source}: ${f.title}. ${f.detail}`), tenderFile: picked.find((f) => f.file)?.file };
+    o.contact = { ...c, via: `${NAMES[by] ?? by} (records search)` };
+    olog(s, o, by, `Shared from the records search: ${picked.map((f) => f.title).join("; ")}`);
+    addTask(s, { oppId: o.id, forUser: o.owner, by, title: `Call or visit ${c.name} about ${o.placeName}`, detail: `${NAMES[by]} found ${c.name}, ${c.role}${c.phone ? `, ${c.phone}` : ""}.${o.research.tenderFile ? ` Also found the tender document ${o.research.tenderFile}.` : ""} Record the conversation when you have spoken.`, days: 2, kind: "contact", source: "contact" });
+    ping(s, o.owner, `${NAMES[by]} found a contact for ${o.placeName}: ${c.name}, ${c.role}`);
+  },
+  /** The rep finds the customer without help and goes straight to the conversation. */
+  selfContact(s: State, id: string, by: string) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, ["findContact"]);
+    addTask(s, { oppId: id, forUser: o.owner, by, title: `Call or visit the customer at ${o.placeName}`, detail: "Find the person in charge yourself and record the conversation.", days: 2, kind: "contact" });
+    olog(s, o, by, "Finding the contact without help");
+  },
+  /** The rep spoke to the customer. What the customer said decides the path. */
+  talk(s: State, id: string, by: string, t: Omit<Talk, "by" | "at">) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, ["contact", "findContact"]);
+    (o.talks ??= []).push({ ...t, by, at: nowS(s) });
+    if (t.with.name) o.contact = { name: t.with.name, role: t.with.role, phone: t.with.phone, email: o.contact?.email, via: o.contact?.name === t.with.name ? o.contact.via : `${NAMES[by] ?? by} (${t.how.toLowerCase()})` };
+    olog(s, o, by, `${t.how} with ${t.with.name || "the customer"}: ${t.said || "no note"}`);
+    if (t.outcome === "callback") {
+      const days = t.callbackDays ?? 7;
+      addTask(s, { oppId: id, forUser: o.owner, by, title: `Call back ${t.with.name || "the customer"} at ${o.placeName}`, detail: `They asked to be called back. Last time: ${t.said || "no note"}`, days, kind: "contact", source: "Reminder" });
+      olog(s, o, by, `Call back in ${days} days. Reminder set`); return;
+    }
+    if (t.outcome === "notInterested") { o.stage = "closed"; o.closedAt = nowS(s); o.lostReason = `Not interested: ${t.reason ?? "no reason given"}`; olog(s, o, by, `Closed. ${o.lostReason}`); return; }
+    if (t.outcome === "tender") {
+      const lifts = Number(t.wants.lifts) || 0;
+      OP.qualify(s, id, by, "tender", t.eordDays ?? 30);
+      const tn = tenderOf(s, o.tenderId);
+      if (tn && lifts) { tn.value = Math.round((tn.value / Math.max(1, tn.lifts)) * lifts); tn.lifts = lifts; }
+      const file = t.tenderFile ?? o.research?.tenderFile;
+      if (tn && file) { tn.doc = readTenderDoc(tn, { name: file, size: 860000 }, nowS(s)); olog(s, o, by, `Tender document ${file} attached`); }
+      return;
+    }
+    OP.qualify(s, id, by, "direct");
   },
   /** Whoever was asked returns a contact. The owner gets the next task. */
   provideContact(s: State, taskId: string, by: string, c: { name: string; role: string; phone?: string; email?: string }) {
@@ -234,20 +358,22 @@ export const OP = {
     addTask(s, { oppId: id, forUser: o.owner, by, title: `Qualify ${o.placeName}: tender or direct quote?`, days: 2, kind: "qualify" });
   },
   /** The owner decides. A formal request becomes a tender with a bid and an offer. Otherwise a direct offer. */
-  qualify(s: State, id: string, by: string, choice: "tender" | "direct" | "notfit", eordDays = 30) {
+  qualify(s: State, id: string, by: string, choice: "tender" | "direct" | "notfit", eordDays = 30, terms: { product?: ProductKey; term?: number; discountPct?: number } = {}) {
     const o = oppOf(s, id); if (!o) return;
     closeTasks(s, id, ["qualify"]);
     if (choice === "notfit") { o.stage = "closed"; o.closedAt = nowS(s); olog(s, o, by, "Not a fit. Closed"); return; }
-    const product: ProductKey = o.kind === "newbuild" ? "newinstall" : o.kind === "renewal" ? "renewal" : o.kind === "modernisation" ? "modernisation" : "maintenance";
+    const product: ProductKey = terms.product ?? (o.kind === "newbuild" || o.kind === "project" ? "newinstall" : o.kind === "renewal" ? "renewal" : o.kind === "modernisation" ? "modernisation" : "maintenance");
     const accId = o.accountId ?? ensureAccountFor(s, o).id; o.accountId = accId;
-    const offer = SH.makeOffer(s, { accountId: accId, area: o.area, product, term: product === "maintenance" || product === "renewal" ? 3 : 1, discountPct: 0, by: o.owner, oppId: o.id, source: o.source.itemId ? { reportId: o.source.reportId!, itemId: o.source.itemId } : undefined });
+    const offer = SH.makeOffer(s, { accountId: accId, area: o.area, product, term: terms.term ?? (product === "maintenance" || product === "renewal" ? 3 : 1), discountPct: terms.discountPct ?? 0, by: o.owner, oppId: o.id, source: o.source.itemId ? { reportId: o.source.reportId!, itemId: o.source.itemId } : undefined });
     o.offerId = offer.id;
     if (choice === "tender") {
-      const t: Tender = { id: `T-${s.sherpa.seq++}`, name: `${o.title}: ${o.placeName}`, accountId: accId, area: o.area, owner: o.owner, line: "ni", stage: "bidding", eord: nowS(s) + eordDays * DAY, value: o.value ?? PRODUCT[product].list, lifts: 1, summary: `Tender raised from ${o.source.label}.`, discovered: nowS(s), oppId: o.id, checklist: PAPER_LIST() };
+      const t: Tender = { id: `T-${s.sherpa.seq++}`, name: o.title.includes(o.placeName) ? o.title : `${o.title}: ${o.placeName}`, accountId: accId, area: o.area, owner: o.owner, line: "ni", stage: "bidding", eord: nowS(s) + eordDays * DAY, value: PRODUCT[product].list * (Number(o.site?.lifts) || 1), lifts: Number(o.site?.lifts) || 1, summary: `Tender raised from ${o.source.label}.${o.site ? ` Site visit: ${o.site.lifts || "?"} lifts, ${o.site.floors || "floors not known"}.` : ""}`, discovered: nowS(s), oppId: o.id, checklist: PAPER_LIST() };
       s.sherpa.tenders.unshift(t); o.tenderId = t.id; o.stage = "bid"; olog(s, o, by, `Formal tender ${t.id} raised. Bid due in ${eordDays} days`);
-      if (product === "newinstall") { offer.missing = ["Rated load (kg)", "Number of floors", "Door type"]; addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Complete the configuration for ${offer.id}`, detail: `${o.title}. Missing: rated load, floors, door type.`, days: 2, kind: "config", source: "N21" }); olog(s, o, by, "Asked Sales support to complete the configuration"); }
-      addTask(s, { oppId: id, forUser: MANAGER, by, title: `Create the bid for ${t.id}`, detail: `Bid due in ${eordDays} days. Sales Support completes the lift details, then you build the bid.`, days: Math.max(2, eordDays - 5), kind: "bid", source: "N13" });
-    } else { o.stage = "offer"; olog(s, o, by, `Direct offer ${offer.id} drafted`); addTask(s, { oppId: id, forUser: o.owner, by, title: `Price and send ${offer.id}`, days: 3, kind: "revise" }); }
+      if (product === "newinstall") offer.missing = ["Rated load (kg)", "Number of floors", "Door type"];
+      if (isNI(o)) { addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Fill in the lift details from tender ${t.id}`, detail: `${NAMES[o.owner]} has a formal tender from the customer. Read the tender document and answer what it leaves open. Bid due in ${eordDays} days.`, days: Math.max(1, Math.min(3, eordDays - 10)), kind: "config", source: "N13" }); return; }
+      addTask(s, { oppId: id, forUser: o.owner, by, title: `Upload the tender document for ${t.id}`, detail: `Bid due in ${eordDays} days. SHERPA reads the document, asks what it leaves open and drafts the bid. The Sales Manager approves it.`, days: Math.max(2, eordDays - 7), kind: "tenderDoc", source: "N13" });
+    } else if (product === "newinstall" || product === "modernisation") { o.stage = "offer"; olog(s, o, by, `Quotation ${offer.id} started`); addTask(s, { oppId: id, forUser: o.owner, by, title: `Answer the quotation questions for ${offer.id}`, detail: "A few questions about the lifts. SHERPA drafts the quotation from them.", days: 3, kind: "quoteBrief" }); }
+    else { o.stage = "offer"; olog(s, o, by, `Direct offer ${offer.id} drafted`); addTask(s, { oppId: id, forUser: o.owner, by, title: `Check and submit ${offer.id} for approval`, days: 3, kind: "revise" }); }
   },
   /** Offer events keep the opportunity and everyone's tasks in step. */
   onOffer(s: State, of: Offer, ev: "submitted" | "approved" | "changes" | "rejected" | "sent" | "chased" | "won" | "lost" | "blocked", note = "") {
@@ -256,16 +382,14 @@ export const OP = {
     if (ev === "submitted") { closeTasks(s, o.id, ["revise", "send", "config"]); of.approvals.forEach((x) => addTask(s, { oppId: o.id, forUser: x.by, by: of.createdBy, title: `Approve ${of.discountPct}% on ${of.id} for ${acc}`, detail: `${of.title}, ${inr(of.price)}. Guideline is ${GUIDE.seller}%.`, days: 2, kind: "approve", source: "N19" })); o.stage = "offer"; olog(s, o, of.createdBy, `${of.id} sent for approval`); }
     if (ev === "approved") { closeTasks(s, o.id, ["approve", "revise"]); o.stage = o.stage === "bid" ? "bid" : "offer"; addTask(s, { oppId: o.id, forUser: of.createdBy, by: MANAGER, title: `Send ${of.id} to ${acc}`, detail: "Approved. Edit the email if you like and send it.", days: 1, kind: "send" }); olog(s, o, MANAGER, `${of.id} approved`); }
     if (ev === "changes" || ev === "rejected") { closeTasks(s, o.id, ["approve"]); addTask(s, { oppId: o.id, forUser: of.createdBy, by: MANAGER, title: ev === "changes" ? `Revise ${of.id}: ${note}` : `${of.id} was rejected: ${note}`, days: 2, kind: "revise" }); olog(s, o, MANAGER, ev === "changes" ? `Changes asked on ${of.id}: ${note}` : `${of.id} rejected: ${note}`); }
-    if (ev === "sent") { closeTasks(s, o.id, ["send", "compliance"]); o.stage = "sent"; addTask(s, { oppId: o.id, forUser: of.createdBy, by: of.createdBy, title: `Follow up with ${acc} on ${of.id}`, detail: "Nothing from the customer yet. Call or send the follow-up SHERPA drafted.", days: 14, kind: "followup", source: "N16" }); olog(s, o, of.createdBy, `${of.id} sent to the customer. Follow-up in 14 days`); if (o.tenderId) { const t = tenderOf(s, o.tenderId); if (t) t.stage = "submitted"; } }
+    if (ev === "sent") { if (o.source.itemId) leadHooks.quoted?.(s, o.source.itemId, of.createdBy); closeTasks(s, o.id, ["send", "compliance"]); o.stage = "sent"; addTask(s, { oppId: o.id, forUser: of.createdBy, by: of.createdBy, title: `Follow up with ${acc} on ${of.id}`, detail: "Nothing from the customer yet. Call or send the follow-up SHERPA drafted.", days: 14, kind: "followup", source: "N16" }); olog(s, o, of.createdBy, `${of.id} sent to the customer. Follow-up in 14 days`); if (o.tenderId) { const t = tenderOf(s, o.tenderId); if (t) t.stage = "submitted"; } }
     if (ev === "chased") { s.sherpa.tasks.forEach((t) => { if (t.oppId === o.id && t.kind === "followup" && !t.done) t.due = nowS(s) + 14 * DAY; }); olog(s, o, of.createdBy, "Follow-up sent. Next check in 14 days"); }
     if (ev === "won") {
-      closeTasks(s, o.id, null); o.stage = "won"; o.closedAt = nowS(s); olog(s, o, of.createdBy, `Won: ${of.id}, ${inr(of.price)}`);
+      closeTasks(s, o.id, null); o.stage = "contract"; olog(s, o, of.createdBy, `Customer accepted ${of.id}, ${inr(of.price)}. Contract next`);
       const t = tenderOf(s, o.tenderId); if (t) t.stage = "won";
-      const sc = s.cfg.owners[o.area]?.SC; const a = accountOf(s, of.accountId);
-      if (sc && of.product !== "renewal" && of.product !== "maintenance") addTask(s, { oppId: o.id, forUser: sc, by: of.createdBy, title: `Offer a service contract to ${acc}`, detail: `${of.id} was won. Handover pack: customer, lifts, contacts and the signed scope.`, days: 7, kind: "handover", source: "N25" });
-      if (a?.key) addTask(s, { oppId: o.id, forUser: s.cfg.owners[o.area]?.AM ?? "lena", by: of.createdBy, title: `Update the account plan for ${acc}`, detail: `${of.id} won at a key account.`, days: 7, kind: "handover" });
+      CT.draft(s, of, o);
     }
-    if (ev === "lost") { closeTasks(s, o.id, null); o.stage = "lost"; o.closedAt = nowS(s); olog(s, o, of.createdBy, `Lost: ${of.id}${note ? `: ${note}` : ""}`); const t = tenderOf(s, o.tenderId); if (t) t.stage = "lost"; }
+    if (ev === "lost") { if (o.source.itemId) leadHooks.closed?.(s, o.source.itemId, o.owner, "lost"); closeTasks(s, o.id, null); o.stage = "lost"; o.closedAt = nowS(s); o.lostReason = note || "No reason given"; olog(s, o, of.createdBy, `Lost: ${of.id}${note ? `: ${note}` : ""}`); const t = tenderOf(s, o.tenderId); if (t) t.stage = "lost"; }
   },
   declined(s: State, id: string, by: string, reason: string) {
     const o = oppOf(s, id); if (!o) return;
@@ -296,10 +420,11 @@ export const OP = {
     offer.status = "approved"; offer.approvals = [{ by, status: "approved", at: nowS(s) }]; offer.email = undefined; offer.lastActivity = nowS(s);
     offer.log.push({ t: nowS(s), by: NAMES[by] ?? by, text: `Bid created: ${discountPct}% off, ${inr(offer.price)}` });
     t.checklist.forEach((c) => { c.done = true; }); t.stage = "final"; t.bid = { by, at: nowS(s), discountPct };
-    closeTasks(s, o.id, ["bid", "compliance", "approve", "revise", "config"]);
+    closeTasks(s, o.id, ["bid", "compliance", "approve", "revise", "config", "approveBid", "tenderDoc"]);
     o.offerId = offer.id; offer.oppId = o.id; o.value = offer.price; o.stage = "offer";
     const acc = accountOf(s, t.accountId)?.name ?? o.placeName;
     olog(s, o, by, `Bid for ${t.id} created: ${discountPct}% off, ${inr(offer.price)}`);
+    if (isNI(o)) { o.stage = "bid"; addTask(s, { oppId: o.id, forUser: SUPPORT, by, title: `Review the terms and papers of the bid for ${t.id}`, detail: `${NAMES[by]} prepared the bid at ${discountPct}% off, ${inr(offer.price)}. Check the contract terms and every paper before ${NAMES[o.owner]} confirms it with the customer's request.`, days: 1, kind: "bidReview", source: "Bid" }); return; }
     addTask(s, { oppId: o.id, forUser: o.owner, by, title: `Send the bid to ${acc}`, detail: `${NAMES[by]} created the bid. Check the email and send it to the customer.`, days: 2, kind: "send", source: "Bid" });
   },
   tickCompliance(s: State, id: string, by: string) {
@@ -313,11 +438,130 @@ export const OP = {
     olog(s, o, by, `Assigned to ${NAMES[to]}`);
     if (o.stage === "new") addTask(s, { oppId: id, forUser: to, by, title: `Accept: ${o.title} at ${o.placeName}`, days: 1, kind: "accept" });
   },
+  tenderDoc(s: State, tenderId: string, by: string, file: { name: string; size: number }) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t) return;
+    t.doc = readTenderDoc(t, file, nowS(s));
+    if (o) olog(s, o, by, `Tender document ${file.name} read: ${t.doc.found.length} facts found, ${t.doc.gaps.length} questions`);
+  },
+  answerGaps(s: State, tenderId: string, by: string, answers: Record<string, string>) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t?.doc) return;
+    t.doc.gaps.forEach((g) => { if (answers[g.key]) g.a = answers[g.key]; });
+    const of = offerOf(s, o?.offerId); if (of) { of.missing = undefined; of.log.push({ t: nowS(s), by: NAMES[by] ?? by, text: "Lift details completed from the tender document and the owner's answers" }); }
+    BID_PAPERS.forEach((p, i) => { if (p.auto && t.checklist[i]) t.checklist[i].done = true; });
+    t.value = Math.round(t.value * t.doc.gaps.reduce((f, g) => f * (FACTORS[g.a ?? ""] ?? 1), 1));
+    if (o) olog(s, o, by, "Bid drafted from the tender document. Papers SHERPA can make are filled");
+    if (o && isNI(o) && !t.bid) {
+      closeTasks(s, o.id, ["config"]);
+      if (!tasksOfOpp(s, o.id).some((x) => x.kind === "bid")) addTask(s, { oppId: o.id, forUser: MANAGER, by, title: `Prepare the bid for ${t.id}`, detail: `${NAMES[by]} filled in the lift details from the tender. Set the price with earlier quotes, check the papers and answer any competitor part the tender names.`, days: Math.max(1, Math.min(3, daysTo(s, t.eord) - 5)), kind: "bid", source: "Bid" });
+    }
+  },
+  /** The owner sends the draft bid to the Sales Manager. */
+  submitBid(s: State, tenderId: string, by: string, discountPct: number) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t || !o) return;
+    t.draft = { by, at: nowS(s), discountPct, answers: Object.fromEntries((t.doc?.gaps ?? []).map((g) => [g.key, g.a ?? ""])) };
+    closeTasks(s, o.id, ["tenderDoc", "bid", "revise"]);
+    olog(s, o, by, `Draft bid sent to ${NAMES[MANAGER]} for approval: ${discountPct}% off`);
+    addTask(s, { oppId: o.id, forUser: MANAGER, by, title: `Approve the bid for ${t.id}`, detail: `${NAMES[by]} drafted it at ${discountPct}% off ${inr(t.value)}. Check the price and papers, change anything, then approve.`, days: Math.max(1, Math.min(3, daysTo(s, t.eord) - 2)), kind: "approveBid", source: "Bid" });
+  },
+  bidChanges(s: State, tenderId: string, by: string, note: string) {
+    const t = tenderOf(s, tenderId); const o = oppOf(s, t?.oppId); if (!t || !o) return;
+    t.draft = undefined; closeTasks(s, o.id, ["approveBid"]);
+    olog(s, o, by, `Changes asked on the bid: ${note}`);
+    addTask(s, { oppId: o.id, forUser: o.owner, by, title: `Revise the draft bid for ${t.id}: ${note}`, days: 2, kind: "tenderDoc", source: "Bid" });
+  },
+  /** The owner answered the quotation questions. SHERPA prices the draft from them. */
+  quoteBrief(s: State, oppId: string, by: string, b: QuoteBrief) {
+    const o = oppOf(s, oppId); const of = offerOf(s, o?.offerId); if (!o || !of) return;
+    of.brief = b; of.listPrice = Math.round(listPrice(of.area, of.product, of.term) * briefFactor(b)); of.price = Math.round(of.listPrice * (1 - of.discountPct / 100)); of.missing = undefined; of.email = undefined;
+    of.log.push({ t: nowS(s), by: "SHERPA", text: `Draft quotation priced from the answers: ${b.floors} floors, ${b.load}, ${b.speed}` }); of.lastActivity = nowS(s);
+    o.value = of.price; closeTasks(s, oppId, ["quoteBrief"]);
+    olog(s, o, by, `Quotation questions answered. Draft ${of.id} at ${inr(of.price)}`);
+    addTask(s, { oppId, forUser: o.owner, by, title: `Check the draft quotation ${of.id} and send it for approval`, detail: "SHERPA priced it from your answers. Change the discount if needed, then submit.", days: 2, kind: "revise" });
+  },
+  /** Sales support checked the bid's terms and papers. */
+  bidReviewed(s: State, id: string, by: string, ok: boolean, note = "") {
+    const o = oppOf(s, id); const t = tenderOf(s, o?.tenderId); if (!o || !t) return;
+    closeTasks(s, id, ["bidReview"]);
+    if (!ok) return OP.bidBack(s, id, by, note);
+    olog(s, o, by, `Bid terms and papers checked${note ? `: ${note}` : ""}`);
+    addTask(s, { oppId: id, forUser: o.owner, by, title: `Confirm the bid matches what ${o.contact?.name ?? "the customer"} asked`, detail: `The bid for ${t.id} is ready. Check it against the customer's request before it goes out.`, days: 1, kind: "bidConfirm", source: "Bid" });
+  },
+  /** The rep confirmed the bid matches the customer's request, or sent it back. */
+  bidConfirmed(s: State, id: string, by: string, ok: boolean, note = "") {
+    const o = oppOf(s, id); const t = tenderOf(s, o?.tenderId); if (!o || !t) return;
+    closeTasks(s, id, ["bidConfirm"]);
+    if (!ok) return OP.bidBack(s, id, by, note);
+    olog(s, o, by, "Bid matches what the customer asked");
+    addTask(s, { oppId: id, forUser: o.owner, by, title: `Send the bid to ${accountOf(s, t.accountId)?.name ?? o.placeName}`, detail: "Checked by Sales support and by you. Write the email, or download the bid for the tender portal.", days: 1, kind: "send", source: "Bid" });
+  },
+  bidBack(s: State, id: string, by: string, note: string) {
+    const o = oppOf(s, id); const t = tenderOf(s, o?.tenderId); if (!o || !t) return;
+    t.bid = undefined; t.stage = "bidding"; o.stage = "bid";
+    olog(s, o, by, `Bid sent back to ${NAMES[MANAGER]}: ${note}`);
+    addTask(s, { oppId: id, forUser: MANAGER, by, title: `Change the bid for ${t.id}: ${note}`, detail: `${NAMES[by]} sent the bid back.`, days: 1, kind: "bid", source: "Bid" });
+  },
+  /** The order deadline is near: this is the last version of the bid. */
+  markFinal(s: State, id: string, by: string) {
+    const o = oppOf(s, id); const t = tenderOf(s, o?.tenderId); if (!o || !t) return;
+    t.stage = "final"; olog(s, o, by, `Bid for ${t.id} marked final`);
+  },
+  /** The customer said yes. The Sales Manager approves the win next. */
+  agreed(s: State, id: string, by: string, a: Omit<Agreement, "by" | "at">) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, ["followup", "agreed", "send"]);
+    o.agreed = { ...a, by, at: nowS(s) }; o.stage = "order"; o.value = a.price;
+    olog(s, o, by, `Customer agreed: ${inr(a.price)}, start ${new Date(a.start).toLocaleDateString("en-IN")}, ${a.how.toLowerCase()}. Proof: ${a.proof}`);
+    addTask(s, { oppId: id, forUser: MANAGER, by, title: `Approve the win: ${o.placeName}, ${inr(a.price)}`, detail: `${NAMES[by]} recorded the customer's yes (${a.how.toLowerCase()}). Check the price and the proof, then approve or ask for a change.`, days: 1, kind: "approveWin", source: "Order" });
+  },
+  winDecision(s: State, id: string, by: string, ok: boolean, note = "") {
+    const o = oppOf(s, id); if (!o?.agreed) return;
+    closeTasks(s, id, ["approveWin"]);
+    if (!ok) {
+      olog(s, o, by, `Win not approved yet: ${note}`);
+      addTask(s, { oppId: id, forUser: o.owner, by, title: `Change the agreed terms: ${note}`, detail: `${NAMES[by]} asked for a change before the order is created.`, days: 2, kind: "agreed", source: "Order" }); return;
+    }
+    olog(s, o, by, "Win approved. Sales support creates the order");
+    addTask(s, { oppId: id, forUser: SUPPORT, by, title: `Create the order for ${o.placeName}`, detail: `${inr(o.agreed.price)}, start ${new Date(o.agreed.start).toLocaleDateString("en-IN")}. Set the order number, delivery date and payment terms.`, days: 1, kind: "order", source: "Order" });
+  },
+  /** The order is created. This is the win. */
+  createOrder(s: State, id: string, by: string, p: { number: string; delivery: number; payment: string }) {
+    const o = oppOf(s, id); if (!o?.agreed) return;
+    const now = nowS(s); const of = offerOf(s, o.offerId); const acc = accountOf(s, o.accountId); const t = tenderOf(s, o.tenderId);
+    closeTasks(s, id, null);
+    o.order = { ...p, by, at: now }; o.stage = "won"; o.closedAt = now; o.value = o.agreed.price;
+    if (of) { of.status = "won"; of.price = o.agreed.price; log(s, of, by, `Order ${p.number} created. Won`); s.sherpa.past.push({ id: `p${s.sherpa.seq++}`, area: of.area, product: of.product, price: perYear(of), discountPct: of.discountPct, outcome: "won", at: now, customer: acc?.name ?? o.placeName }); }
+    if (t) t.stage = "won";
+    olog(s, o, by, `Order ${p.number} created: delivery ${new Date(p.delivery).toLocaleDateString("en-IN")}, ${p.payment}`);
+    if (acc) {
+      acc.lines.ni = true; acc.lastActivity = now; (acc.activity ??= []).push({ t: now, by: NAMES[by] ?? by, text: `Order ${p.number} for ${o.placeName}: ${inr(o.agreed.price)}` });
+      for (let i = 0; i < (t?.lifts ?? (Number(o.talks?.at(-1)?.wants.lifts) || 1)); i++) s.sherpa.assets.push({ id: `a-${s.sherpa.seq++}`, accountId: acc.id, placeId: acc.placeIds[0] ?? "", label: `New lift ${i + 1} · ${o.placeName}`, model: "Schindler 3300", ageYears: 0, brand: "ours", callbacks14d: 0, callbacks90d: 0, callbacksPrev90d: 0, faults90d: 0, health: 100, handedOver: false, servicer: "Schindler", owner: s.cfg.owners[o.area]?.EI ?? o.owner });
+    }
+    crm(s, by, `Order ${p.number} written to NewCRM: ${o.placeName}, ${inr(o.agreed.price)}`);
+    const lead = serviceLeadFor(o.area);
+    if (lead) { o.job = { lead }; addTask(s, { oppId: id, forUser: lead, by, title: `Accept the job: ${o.placeName}`, detail: `Order ${p.number}, delivery ${new Date(p.delivery).toLocaleDateString("en-IN")}. Read the handover pack, then accept with a planned start and a site contact.`, days: 3, kind: "job", source: "Handover" }); }
+    const sc = s.cfg.owners[o.area]?.SC;
+    if (sc) addTask(s, { oppId: id, forUser: sc, by: "SHERPA", title: `Offer a maintenance contract to ${acc?.name ?? o.placeName}`, detail: `Order ${p.number} for new lifts. Offer maintenance from handover.`, days: 7, kind: "handover", source: "N25" });
+    addTask(s, { oppId: id, forUser: s.cfg.owners[o.area]?.AM ?? "lena", by: "SHERPA", title: `Update the account for ${acc?.name ?? o.placeName}`, detail: `New installation won (order ${p.number}). Update the account and look for what other teams could sell.`, days: 7, kind: "accountAction", source: "Order" });
+    const ml = s.sherpa.mleads.find((l) => l.oppId === o.id); const camp = s.sherpa.campaigns.find((c) => c.id === ml?.campaignId);
+    if (camp) addTask(s, { oppId: id, forUser: "manoj", by: "SHERPA", title: `Link campaign "${camp.name}" to the won deal`, detail: `${o.placeName} came from this campaign and is now won: ${inr(o.agreed.price)}.`, days: 7, kind: "other", source: "Order" });
+    if (o.source.itemId && leadHooks.closed) leadHooks.closed(s, o.source.itemId, o.owner, "won");
+    else if (o.source.reporter) ping(s, o.source.reporter, `The lead you spotted at ${o.placeName} is won. Thank you!`);
+    ping(s, o.owner, `Order ${p.number} created for ${o.placeName}. Won!`);
+  },
+  /** The service lead took over the job. */
+  acceptJob(s: State, id: string, by: string, p: { start: number; siteContact: { name: string; phone?: string } }) {
+    const o = oppOf(s, id); if (!o) return;
+    closeTasks(s, id, ["job"]);
+    o.job = { lead: by, start: p.start, siteContact: p.siteContact, acceptedAt: nowS(s) };
+    olog(s, o, by, `Job accepted. Planned start ${new Date(p.start).toLocaleDateString("en-IN")}, site contact ${p.siteContact.name}${p.siteContact.phone ? `, ${p.siteContact.phone}` : ""}`);
+    ping(s, o.owner, `${NAMES[by]} accepted the job at ${o.placeName}. Start ${new Date(p.start).toLocaleDateString("en-IN")}.`);
+  },
   /** Keeps the opportunity in step with the Snap & Lead lead it came from. */
   sync(s: State) {
     s.sherpa.opps.forEach((o) => {
       if (o.source.type !== "snap" || !o.source.itemId || !isOpen(o)) return;
       const it = s.reports.flatMap((r) => r.items).find((x) => x.id === o.source.itemId); if (!it) return;
+      if (o.stage === "review" || o.stage === "contract" || o.stage === "order") return;
       if (it.ownerId && it.ownerId !== o.owner) { const prev = o.owner; o.owner = it.ownerId; s.sherpa.tasks.forEach((t) => { if (t.oppId === o.id && !t.done && t.forUser === prev) t.forUser = it.ownerId; }); }
       if (it.status === "closed" && it.kind === "lead") { o.stage = /Won/i.test(it.outcome ?? "") ? "won" : "closed"; o.closedAt = nowS(s); closeTasks(s, o.id, null); }
     });
@@ -330,6 +574,128 @@ function ensureAccountFor(s: State, o: Opp): Account {
   s.sherpa.accounts.push(a); return a;
 }
 
+function newAccountFor(s: State, o: Opp): Account {
+  const a: Account = { id: `acc-${s.sherpa.seq++}`, name: o.placeName, area: o.area, placeIds: [], owner: o.owner, lastActivity: nowS(s), lines: { ni: false, ei: false, sc: false, mod: false }, contact: { name: o.contact?.name ?? "To be confirmed", role: o.contact?.role ?? "", email: o.contact?.email ?? "contact@customer.example" } };
+  const r = s.reports.find((x) => x.id === o.source.reportId); if (r) a.placeIds.push(r.placeId);
+  s.sherpa.accounts.push(a); return a;
+}
+/** Accounts that could be this customer: same place first, then a shared word in the name. */
+export function accountMatches(s: State, o: Opp): Account[] {
+  const r = s.reports.find((x) => x.id === o.source.reportId);
+  const words = o.placeName.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3 && !["tower", "block", "building", "site"].includes(w));
+  const byPlace = s.sherpa.accounts.filter((a) => (r && a.placeIds.includes(r.placeId)) || a.id === o.accountId);
+  const byName = s.sherpa.accounts.filter((a) => !byPlace.includes(a) && words.some((w) => a.name.toLowerCase().includes(w)));
+  return [...byPlace, ...byName].slice(0, 3);
+}
+const productOfKind = (k: Opp["kind"]): ProductKey => (k === "newbuild" || k === "project" ? "newinstall" : k === "renewal" ? "renewal" : k === "modernisation" ? "modernisation" : "maintenance");
+/** Score reasons from history: the win rate in the area, the customer and earlier deals at the place. */
+function historyReasons(s: State, o: Opp, placeId: string): Reason[] {
+  const out: Reason[] = [];
+  const ref = regionRef(s, o.area, productOfKind(o.kind));
+  if (ref.count >= 3 && ref.winRate >= 60) out.push({ label: `History: we won ${ref.winRate}% of similar quotes in ${AREA_NAME[o.area] ?? o.area}`, pts: 5 });
+  if (ref.count >= 3 && ref.winRate <= 30) out.push({ label: `History: only ${ref.winRate}% won in ${AREA_NAME[o.area] ?? o.area}`, pts: -5 });
+  const acc = s.sherpa.accounts.find((a) => a.placeIds.includes(placeId));
+  if (acc) out.push({ label: `History: ${acc.name} is already a customer`, pts: 5 });
+  const before = s.sherpa.opps.filter((x) => x.id !== o.id && x.placeName === o.placeName);
+  if (before.some((x) => x.stage === "won")) out.push({ label: "History: we won a deal at this place before", pts: 5 });
+  if (before.some((x) => isOpen(x))) out.push({ label: "History: another deal is already open here", pts: -5 });
+  return out;
+}
+export interface Insight { lines: string[]; nba: { title: string; why: string } }
+/** What the manager sees next to a lead under review. Mock AI: rules over the same data. */
+export function reviewBrief(s: State, o: Opp): Insight {
+  const r = s.reports.find((x) => x.id === o.source.reportId); const i = r?.input;
+  const ref = regionRef(s, o.area, productOfKind(o.kind));
+  const acc = accountOf(s, o.accountId) ?? (r ? s.sherpa.accounts.find((a) => a.placeIds.includes(r.placeId)) : undefined);
+  const assets = acc ? s.sherpa.assets.filter((a) => a.accountId === acc.id) : [];
+  const lines: string[] = [];
+  lines.push(acc ? `${acc.name} is an existing customer${assets.length ? ` with ${assets.length} unit${assets.length > 1 ? "s" : ""} on record` : ""}.` : "No customer record yet. One is created when the deal is set up.");
+  if (ref.count) lines.push(`${AREA_NAME[o.area] ?? o.area}: ${ref.wins} of ${ref.count} similar quotes won in the last year, average discount ${Math.round(ref.avgDiscount)}%.`);
+  else lines.push(`No similar quotes in ${AREA_NAME[o.area] ?? o.area} in the last year.`);
+  if (i) {
+    if (i.brand === "other") lines.push(`Serviced by ${i.servicer === "maker" ? "its maker" : i.servicer === "staff" ? "building staff" : i.servicer === "nobody" ? "nobody" : "another company"}, about ${i.age} years old.`);
+    if (i.condition === "minor" || i.condition === "out") lines.push(`The reporter saw ${i.condition === "out" ? "it out of service" : "minor issues"}.`);
+    if (i.subject === "site") lines.push(`Building site${i.stage ? `, ${i.stage === "early" ? "early stage" : i.stage === "structure" ? "structure going up" : "finishing"}` : ""}. ${i.competitorInstalling ? "A competitor is on site." : "No lift supplier seen yet."}`);
+  }
+  const nba = o.kind === "newbuild" || o.kind === "project"
+    ? { title: "Pursue: the NI rep calls the developer", why: "Building sites are won before the tender. Ask for the timeline and whether a tender is planned." }
+    : o.kind === "modernisation" ? { title: "Book a modernisation survey", why: "An old unit with problems. A survey gives the facts for the quotation." }
+    : o.kind === "renewal" ? { title: "Visit, then offer a 3-year renewal", why: "The contract ended or is ending. Renewals close fastest after a visit." }
+    : i?.brand === "other" ? { title: "Competitor-serviced unit: approach the owner with a maintenance offer (NBA 9)", why: "The owner already pays for service. A visit and a first-year discount win most of these." }
+    : { title: "Visit and offer a maintenance contract", why: "Our lift without an active contract." };
+  return { lines, nba };
+}
+export interface DealNba { key: string; title: string; why: string; product: ProductKey; term: number; discountPct: number }
+/** Next best actions for an existing installation, from the report and the unit. */
+export function dealNbas(s: State, o: Opp): DealNba[] {
+  const i = s.reports.find((x) => x.id === o.source.reportId)?.input;
+  const out: DealNba[] = [];
+  if (i?.brand === "other" || o.kind === "existing") out.push({ key: "N9", title: "Win the service: 3-year maintenance, 10% off", why: i?.servicer === "nobody" ? "Nobody services it today. A contract is an easy yes." : "Serviced by someone else. A first-year discount is the usual way in.", product: "maintenance", term: 3, discountPct: 10 });
+  if (o.kind === "renewal" || i?.contract === "ended" || i?.contract === "ending" || i?.contract === "cancelled") out.push({ key: "N3", title: "Renew the contract for 3 years", why: "The contract has ended or is ending.", product: "renewal", term: 3, discountPct: 5 });
+  out.push({ key: "N23", title: "1-year maintenance trial at list price", why: "A low-risk first step for a cautious owner.", product: "maintenance", term: 1, discountPct: 0 });
+  if ((i?.age ?? 0) >= 20 || i?.condition === "out") out.push({ key: "N11", title: "Offer a modernisation instead", why: `About ${i?.age ?? 20} years old${i?.condition === "out" ? " and out of service" : ""}. A new drive and controller may cost less than years of repairs.`, product: "modernisation", term: 1, discountPct: 0 });
+  return out;
+}
+
+/* ------------------------------------------------------------------ tender document: mock reading */
+const pick = <T,>(xs: T[], seed: string, k = 0) => xs[[...seed].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7 + k) % xs.length];
+/** Mock records search for Sales support: building permit, company register and our own customer records. */
+export function researchFindings(s: State, o: Opp): Finding[] {
+  const base = o.placeName.split(/[,(]/)[0].replace(/\b(Tower|Block|Site|building site)\b.*$/i, "").trim() || o.placeName;
+  const dev = `${base.split(" ").slice(0, 2).join(" ")} ${pick(["Developers", "Infra Projects", "Constructions", "Realty"], base)} Pvt Ltd`;
+  const first = ["K. Prakash", "S. Lakshmi", "R. Venkat", "M. Farida", "P. Srinivas", "A. Kavya", "N. Harsha"];
+  const phone = (k: number) => `+91 9${pick(["8480", "9490", "7032", "8121"], base, k)} ${String(10000 + (([...base].reduce((h, c) => h + c.charCodeAt(0), 0) * (k + 3)) % 89999)).padStart(5, "0")}`;
+  const acc = accountOf(s, o.accountId) ?? accountMatches(s, o)[0];
+  const slug = base.toLowerCase().replace(/[^a-z]+/g, "-");
+  const out: Finding[] = [
+    { id: "permit", source: "Building permit", kind: "contact", title: `${pick(first, base)}, Project director at ${dev}`, detail: `Named as the applicant on the building permit for ${o.placeName}.`, contact: { name: pick(first, base), role: `Project director, ${dev}`, phone: phone(1) } },
+    { id: "owner", source: "Building permit", kind: "owner", title: `${dev} owns the project`, detail: `Permit holder for ${o.placeName}, ${AREA_NAME[o.area] ?? o.area}.` },
+    { id: "register", source: "Company register", kind: "contact", title: `${pick(first, base, 2)}, Director of ${dev}`, detail: "Listed as a director. Registered office in Hyderabad.", contact: { name: pick(first, base, 2), role: `Director, ${dev}`, email: `director@${slug}.example` } },
+    acc ? { id: "crm", source: "Customer records", kind: "contact", title: `${acc.contact.name}, ${acc.contact.role} at ${acc.name}`, detail: `Existing customer. Last contact ${Math.max(1, Math.round((nowS(s) - acc.lastActivity) / DAY))} days ago.`, contact: { name: acc.contact.name, role: `${acc.contact.role}, ${acc.name}`, email: acc.contact.email } }
+      : { id: "crm", source: "Customer records", kind: "owner", title: "No earlier dealings", detail: `Nothing in our records for ${dev}.` },
+  ];
+  if (o.research?.want.some((w) => /tender/i.test(w))) out.push({ id: "tender", source: "e-Procurement portal", kind: "tender", title: `Tender notice: lifts for ${base}`, detail: "Published on the state portal. Bid due in about 30 days.", file: `${slug}-lift-tender.pdf` });
+  return out;
+}
+
+export function readTenderDoc(t: Tender, file: { name: string; size: number }, at: number): TenderDoc {
+  const g = /G\+(\d+)/.exec(t.summary); const speed = /(\d\.\d) m\/s/.exec(t.summary)?.[1]; const months = /(\d+) months/.exec(t.summary)?.[1];
+  return {
+    name: file.name, size: file.size, at,
+    found: [
+      { label: "Lifts asked for", value: `${t.lifts} passenger lift${t.lifts > 1 ? "s" : ""}`, page: 3 },
+      { label: "Building", value: g ? `G+${g[1]}, ${Number(g[1]) + 1} stops` : "20 stops", page: 3 },
+      { label: "Speed", value: `${speed ?? "1.75"} m/s`, page: 4 },
+      { label: "Delivery", value: months ? `${months} months from order` : "12 months from order", page: 6 },
+      { label: "Last date to submit", value: new Date(t.eord).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }), page: 1 },
+      { label: "Bid security (EMD)", value: "2% of the bid price, bank guarantee", page: 2 },
+      ...(t.competitorSpec ? [{ label: "Named spec", value: t.competitorSpec, page: 5 }] : []),
+    ],
+    gaps: [
+      { key: "load", q: "The document gives no rated load. What should we offer?", opts: ["1,000 kg (13 persons)", "1,350 kg (20 persons)", "1,600 kg (21 persons)"] },
+      { key: "door", q: "Which door type?", opts: ["Centre-opening, 2 panels", "Side-opening, 2 panels", "Telescopic, 3 panels"] },
+      { key: "finish", q: "Cabin finish?", opts: ["Stainless steel, hairline", "Mirror steel", "Painted, customer colour"] },
+      { key: "service", q: "Include free maintenance after handover?", opts: ["12 months", "24 months", "Not included"] },
+    ],
+  };
+}
+const FACTORS: Record<string, number> = { "1,600 kg (21 persons)": 1.04, "Telescopic, 3 panels": 1.02, "Mirror steel": 1.02, "24 months": 1.03 };
+export function briefFactor(b?: QuoteBrief) {
+  if (!b) return 1;
+  const floors = Number(b.floors) || 10;
+  return Math.max(0.85, Math.min(1.4, 1 + (floors - 10) * 0.015)) * (/2\.5|3\.0/.test(b.speed) ? 1.1 : 1) * (/mirror|glass/i.test(b.finish) ? 1.03 : 1);
+}
+const CUSTOMER_LINES = [
+  "Thanks for the quotation. Can you confirm the delivery time for all the lifts?",
+  "Does the price include the first year of maintenance?",
+  "That works for us. Please send the order form and we will sign this week.",
+];
+const SERVICE_LINES = [
+  "Thanks for the offer. How fast do you respond when a lift breaks down?",
+  "Our current contract ends next month. Can you start straight after?",
+  "That works for us. Please send the contract and we will sign this week.",
+];
+
 /** Opportunities and tasks for the seeded tenders and offers, so every offer and tender already belongs to one record. */
 function seedOpps(sh: Sherpa, now: number) {
   const st = { sherpa: sh, clock: 0, cfg: undefined } as unknown as State;
@@ -340,9 +706,10 @@ function seedOpps(sh: Sherpa, now: number) {
   const task = (o: Opp, forUser: string, by: string, title: string, kind: TaskKind, dueDays: number, ageH = 0, detail?: string) => { sh.tasks.push({ id: `TK-${sh.seq++}`, oppId: o.id, title, detail, by, forUser, kind, due: now + dueDays * DAY, done: false, createdAt: now - ageH * HOUR, source: "workflow" }); };
   const acc = (id: string) => sh.accounts.find((a) => a.id === id)!;
   sh.tenders.forEach((t) => {
-    const o = mk(t.name, t.line === "ni" ? "newbuild" : t.line === "sc" ? "renewal" : "modernisation", t.accountId, acc(t.accountId).name, t.area, t.owner, t.stage === "matched" ? "qualify" : "bid", `tender ${t.id}`, 12);
+    const o = mk(t.name, t.line === "ni" ? "newbuild" : t.line === "sc" ? "renewal" : "modernisation", t.accountId, acc(t.accountId).name, t.area, t.owner, t.stage === "matched" ? (t.line === "ni" ? "contact" : "qualify") : "bid", `tender ${t.id}`, 12);
     t.oppId = o.id; o.tenderId = t.id; o.value = t.value; o.contact = { name: acc(t.accountId).contact.name, role: acc(t.accountId).contact.role, email: acc(t.accountId).contact.email, via: "the account record" }; o.visited = t.stage !== "matched";
-    if (t.stage === "matched") task(o, t.owner, "projectfinder", `Qualify ${t.id}: tender or direct quote?`, "qualify", 2, 20, t.summary);
+    if (t.stage === "matched" && t.line === "ni") task(o, t.owner, "projectfinder", `Call ${acc(t.accountId).contact.name} about ${t.id}`, "contact", 2, 20, `${t.summary} Record what the customer wants: quote, formal tender, call back later or not interested.`);
+    else if (t.stage === "matched") task(o, t.owner, "projectfinder", `Qualify ${t.id}: tender or direct quote?`, "qualify", 2, 20, t.summary);
     else task(o, MANAGER, "projectfinder", `Create the bid for ${t.id}`, "bid", Math.max(2, Math.round((t.eord - now) / DAY) - 5), 30, `Bid due ${Math.round((t.eord - now) / DAY)} days from now. Lift details and past prices are ready in the bid builder.`);
   });
   sh.offers.forEach((of) => {
@@ -418,7 +785,7 @@ export const SH = {
     const o = offerOf(s, id); if (!o || !["draft", "changes"].includes(o.status)) return;
     if (t.term !== undefined) o.term = t.term;
     if (t.discountPct !== undefined) o.discountPct = Math.max(0, Math.min(40, Math.round(t.discountPct)));
-    o.listPrice = listPrice(o.area, o.product, o.term); o.price = Math.round(o.listPrice * (1 - o.discountPct / 100));
+    o.listPrice = Math.round(listPrice(o.area, o.product, o.term) * briefFactor(o.brief)); o.price = Math.round(o.listPrice * (1 - o.discountPct / 100));
     o.email = undefined; o.approvals = [];
     log(s, o, by, `Terms changed: ${PRODUCT[o.product].yearly ? `${o.term} year${o.term > 1 ? "s" : ""}, ` : ""}${o.discountPct}% off`);
   },
@@ -426,16 +793,21 @@ export const SH = {
     const o = offerOf(s, id); if (!o || !["draft", "changes"].includes(o.status)) return;
     if (o.missing?.length) { log(s, o, by, "Cannot be sent yet: configuration data is missing"); return; }
     if (aboveLimit(o.discountPct)) { log(s, o, by, `Blocked: ${o.discountPct}% is above the ${GUIDE.manager}% a manager can approve`); OP.onOffer(s, o, "blocked"); return; }
-    const need = approversFor(o.discountPct);
+    const need = approversFor(o.discountPct, s.cfg);
     if (!need.length) { o.status = "approved"; o.approvals = []; log(s, o, by, `Within guideline (${o.discountPct}% is up to ${GUIDE.seller}%): no approval needed`); OP.onOffer(s, o, "approved"); return; }
     o.approvals = need.map((u) => ({ by: u, status: "pending" as const }));
     o.status = "awaiting";
-    log(s, o, by, `Sent for approval to ${need.map((u) => NAMES[u] ?? u).join(" then ")}: ${o.discountPct}% is above the ${GUIDE.seller}% guideline`);
+    log(s, o, by, `Sent for approval to ${need.map((u) => NAMES[u] ?? u).join(" then ")}: ${o.discountPct > GUIDE.seller ? `${o.discountPct}% is above the ${GUIDE.seller}% guideline` : "every quotation is approved by the Sales Manager"}`);
     OP.onOffer(s, o, "submitted");
   },
-  decide(s: State, id: string, by: string, d: "approved" | "changes" | "rejected", reason: string) {
+  decide(s: State, id: string, by: string, d: "approved" | "changes" | "rejected", reason: string, discountPct?: number) {
     const o = offerOf(s, id); if (!o || o.status !== "awaiting") return;
     const step = o.approvals.find((x) => x.status === "pending" && x.by === by); if (!step) return;
+    if (d === "approved" && discountPct !== undefined && discountPct !== o.discountPct && discountPct <= GUIDE.manager) {
+      log(s, o, by, `Discount changed from ${o.discountPct}% to ${discountPct}% by ${NAMES[by] ?? by}`);
+      o.discountPct = discountPct; o.price = Math.round(o.listPrice * (1 - discountPct / 100));
+      const op = oppOf(s, o.oppId); if (op) op.value = o.price;
+    }
     step.status = d; step.reason = reason; step.at = nowS(s);
     const who = NAMES[by] ?? by;
     if (d === "approved") {
@@ -448,11 +820,23 @@ export const SH = {
   },
   send(s: State, id: string, by: string, email: { subject: string; body: string }) {
     const o = offerOf(s, id); if (!o || o.status !== "approved") return;
-    o.email = email; o.status = "sent"; o.sentAt = nowS(s); log(s, o, by, "Email sent to the customer. Follow-up set for 14 days");
+    o.email = email; o.status = "sent"; o.sentAt = nowS(s); o.attachment = `${o.id}-${o.product === "newinstall" || o.product === "modernisation" ? "quotation" : "offer"}.pdf`;
+    o.chat = [{ from: "us", by: NAMES[by] ?? by, t: nowS(s), text: email.subject, file: o.attachment }];
+    log(s, o, by, `Email sent to the customer with ${o.attachment}. Follow-up set for 14 days`);
     const a = accountOf(s, o.accountId); if (a) a.lastActivity = nowS(s);
     if (o.fromNba) s.sherpa.nba[o.fromNba] = { status: "done", at: nowS(s) };
     crm(s, by, `Quote ${o.id} logged on the account with the email attached`);
     OP.onOffer(s, o, "sent");
+  },
+  /** A message to the customer. The mock customer answers straight away. */
+  chat(s: State, id: string, by: string, text: string) {
+    const o = offerOf(s, id); if (!o || !text.trim()) return;
+    const msgs = (o.chat ??= []); const acc = accountOf(s, o.accountId);
+    msgs.push({ from: "us", by: NAMES[by] ?? by, t: nowS(s), text: text.trim() });
+    const n = msgs.filter((m) => m.from === "customer").length;
+    const reply = /discount|price|cost|cheaper/i.test(text) && n < 2 ? "We have one more quote that is a little lower. Can you do anything on the price?" : (PRODUCT[o.product].yearly ? SERVICE_LINES : CUSTOMER_LINES)[Math.min(n, CUSTOMER_LINES.length - 1)];
+    const m: ChatMsg = { from: "customer", by: acc?.contact.name ?? "Customer", t: nowS(s) + 60000, text: reply };
+    msgs.push(m); log(s, o, by, "Message to the customer. The customer replied"); if (acc) acc.lastActivity = nowS(s);
   },
   remind(s: State, id: string, by: string) {
     const o = offerOf(s, id); if (!o || o.status !== "awaiting") return;
@@ -502,7 +886,7 @@ export const SH = {
 /* ------------------------------------------------------------------ generated text */
 export function emailFor(s: State, o: Offer, seller: string): { subject: string; body: string } {
   const a = accountOf(s, o.accountId); const asset = assetOf(s, o.assetId);
-  const first = a?.contact.name.split(" ")[0] ?? "there";
+  const first = (oppOf(s, o.oppId)?.contact ?? a?.contact)?.name.split(" ")[0] ?? "there";
   const what = asset ? asset.label.split(" · ")[0] + (asset.label.split(" · ")[1] ? ` at ${asset.label.split(" · ")[1]}` : "") : (a?.name ?? "your building");
   const tn = s.sherpa.tenders.find((t) => t.oppId === o.oppId && t.bid);
   if (tn) {

@@ -57,3 +57,13 @@ Tags and chips are square-ish (6px). No pills, no fully round shapes except avat
 - Real street map (OpenStreetMap tiles, pan/zoom/pinch, no map library). Pins: Leads (red, flame), Schindler clients (blue, shield), Other clients (grey, flag). An amber dot means needs attention.
 - Filters: layer toggles with counts, area, search, My patch, Key accounts. Nearby pins merge into a square count bubble with a colour strip showing the mix.
 - Side panel lists the places in view, hot first. Selecting one shows why now, facts and three actions: open it, ask SHERPA, directions. A competitor-served building offers Add as a lead.
+
+## Components
+
+Controls come from shadcn on Base UI (`components/ui/*`, added with `npx shadcn@latest add <name>`). Their colours map to the tokens above in `app/globals.css`: `primary` is brand red, `border` is line, `ring` is ink.
+
+- Fields: `Input`, `Textarea`, `Choice` (select), `Check` (checkbox with label) and `Radios` from `components/form.tsx`. Default height 40px, 13.5px text.
+- Buttons: `Btn` in `components/ui.tsx` wraps the shadcn `Button`; use `Button` directly for toolbar and footer actions.
+- Menus, dialogs and pop-overs: `DropdownMenu`, `AlertDialog`, `Dialog`, `Popover`. Inside the phone preview they render on the phone screen (`PortalRoot` in `lib/portal.ts`).
+- Chips, tags, tabs, stat cards and table rows keep their own bespoke styles.
+- In this project `text-muted` is grey text; shadcn's grey fill is `bg-secondary`.

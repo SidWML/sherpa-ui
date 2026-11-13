@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { pointsOf, useApp } from "@/lib/store";
 import { levelOf } from "../Shell";
 import { Icon } from "../ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/form";
 import { reportStatus } from "./status";
 import { useBoard } from "./Leaderboard";
 import { StreamText, Thinking, streamMs, thinkMs } from "../Stream";
@@ -105,8 +107,8 @@ export function QuickAsk({ onOpen, onChat }: { onOpen: (leadId: string) => void;
           <header className="flex shrink-0 items-center gap-2.5 border-b border-line px-4 py-3">
             <span className="grid h-7 w-7 place-items-center rounded-md bg-brand-soft text-brand"><Icon n="sparkle" s={15} /></span>
             <div className="min-w-0 flex-1"><div className="text-[14px] font-semibold">Quick ask</div><div className="t-small">Short answers without leaving this page</div></div>
-            <button onClick={() => { setOpen(false); onChat(); }} className="rounded-md px-2 py-1 text-[12.5px] font-medium text-ink/70 hover:bg-surface hover:text-ink">Open full chat</button>
-            <button aria-label="Close" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={15} /></button>
+            <Button variant="ghost" size="sm" onClick={() => { setOpen(false); onChat(); }} className="text-[12.5px] text-ink/70">Open full chat</Button>
+            <Button variant="outline" size="icon" aria-label="Close" onClick={() => setOpen(false)}><Icon n="x" s={15} /></Button>
           </header>
 
           <div ref={box} className="scroll-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-surface px-3 py-3">
@@ -137,7 +139,7 @@ export function QuickAsk({ onOpen, onChat }: { onOpen: (leadId: string) => void;
               {CHIPS.map((c) => <button key={c.k} onClick={() => chip(c.k, c.label)} disabled={busy} className="shrink-0 disabled:opacity-50 whitespace-nowrap rounded-md border border-line bg-white px-2.5 py-1.5 text-[12.5px] font-medium hover:bg-surface">{c.label}</button>)}
             </div>
             <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-md border border-line bg-white p-1 focus-within:border-brand">
-              <input value={text} onChange={(e) => setText(e.target.value)} placeholder={wait === "lift" ? "Lift number, e.g. 74821" : wait === "lead" ? "Lead ID, e.g. SL-1142" : "Ask a quick question…"} className="min-h-9 min-w-0 flex-1 bg-transparent px-2 text-[13.5px] outline-none placeholder:text-muted" />
+              <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={wait === "lift" ? "Lift number, e.g. 74821" : wait === "lead" ? "Lead ID, e.g. SL-1142" : "Ask a quick question…"} className="h-9 min-w-0 flex-1 px-2 border-0 bg-transparent shadow-none focus-visible:ring-0" />
               <button type="submit" aria-label="Send" disabled={!text.trim() || busy} className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-brand text-white disabled:opacity-35"><Icon n="send" s={15} /></button>
             </form>
           </div>

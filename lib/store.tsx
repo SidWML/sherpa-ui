@@ -1,14 +1,15 @@
 "use client";
-import { OP, seedSherpa } from "./sherpa";
+import { OP, SH, ensureAccount, leadHooks, offerOf, seedSherpa, serviceLeadFor, techFor, tenderOf } from "./sherpa";
+import { AC } from "./accounts";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Alert, Draft, Input, Item, Photo, PointStatus, Report, State, Team, Tier } from "./types";
+import type { Alert, Draft, Input, Item, LeadInfo, Photo, PointStatus, Report, SiteVisit, State, Team, Tier } from "./types";
 import { APPS, DEFAULT_CFG, GLOBAL_OWNER, PLACES, PRESETS, TRACKS, USERS, type AppId } from "./data";
 import { baseInput, evaluate, presetToInput, tierOf } from "./engine";
 
 export const H = 3600000;
 const KEY = "snaplead-poc-v7";
 const USER_KEY: Record<AppId, string> = { sherpa: "sherpa-user", snap: "snaplead-user" };
-export const STATE_VERSION = 7;
+export const STATE_VERSION = 13;
 
 export const userOf = (id?: string | null) => USERS.find((u) => u.id === id);
 export const nowOf = (s: State) => Date.now() + s.clock;
@@ -122,6 +123,16 @@ export function createReport(s: State, p: NewReport): Report {
   if (!queued) activate(s, r);
   else { r.items.forEach((it) => { it.status = "waiting"; }); r.cases.push("J1"); }
   return r;
+}
+
+/** A lift the records steward confirmed joins the installed base, so the next snap of it is found. */
+function addAsset(s: State, r: Report) {
+  if (r.input.number && s.sherpa.assets.some((a) => a.label.startsWith(r.input.number!))) return;
+  const acc = ensureAccount(s, r, s.cfg.owners[r.area]?.EI ?? "ethan");
+  if (!acc.placeIds.includes(r.placeId)) acc.placeIds.push(r.placeId);
+  const c = r.input.condition;
+  s.sherpa.assets.push({ id: `as-${s.sherpa.seq++}`, accountId: acc.id, placeId: r.placeId, label: `${r.input.number ?? `Unit from ${r.id}`} · ${r.placeName}`, model: r.info?.manufacturer || "Schindler, model to confirm", ageYears: r.input.age, brand: "ours", callbacks14d: 0, callbacks90d: 0, callbacksPrev90d: 0, faults90d: c === "out" ? 2 : 0, health: c === "fine" ? 80 : c === "minor" ? 60 : 40, servicer: r.input.servicer === "us" ? "Schindler" : "Unknown", owner: acc.owner });
+  s.sherpa.crm.unshift({ t: nowOf(s), by: "Records", text: `Unit ${r.input.number ?? r.id} added to the installed base at ${r.placeName}` });
 }
 
 /* ---------- clock: follow-up reminders ---------- */
@@ -269,6 +280,7 @@ export const A = {
     if (action === "create" || action === "different") {
       const pend = r.points.find((p) => p.key === "added" && p.status === "pending");
       if (pend) pend.status = "confirmed"; else addPoint(s, r, `added-${it.id}`, "Missing lift added to our records", 30, "confirmed");
+      addAsset(s, r);
     }
     if (action === "confirm" || action === "link" || action === "correct") confirmPoint(r, "sent");
     if (action === "reject" && fake) { r.points.forEach((p) => { if (p.status !== "reversed") p.status = "reversed"; }); r.fake = true; r.trusted = false; notify(s, s.cfg.owners[r.area]?.MGR ?? "marc", `Junk report rejected: ${r.id}`, r.id); }
@@ -356,6 +368,14 @@ export const A = {
     r.timeline.push({ t: nowOf(s), by: "Reporter", text: kind === "contact" ? "Added a contact" : kind === "note" ? "Added a note" : kind === "photo" ? "Added a photo" : `Added detail: ${text}` });
     r.items.forEach((it) => { if (it.ownerId && it.status !== "closed" && it.team) notify(s, it.ownerId, `${r.id}: reporter added ${kind}`, r.id); });
   },
+  editInfo(s: State, reportId: string, info: LeadInfo) {
+    const r = s.reports.find((x) => x.id === reportId); if (!r) return;
+    const hadContact = !!(r.extras.contact || r.info?.contactName.trim());
+    r.info = info;
+    r.timeline.push({ t: nowOf(s), by: userOf(r.reporterId)?.name ?? "Reporter", text: "Lead details updated" });
+    if (!hadContact && info.contactName.trim()) A.extra(s, reportId, "contact", [info.contactName.trim(), info.role.trim()].filter(Boolean).join(", "));
+    else r.items.forEach((it) => { if (it.ownerId && it.status !== "closed" && it.team) notify(s, it.ownerId, `${r.id}: reporter updated the lead details`, r.id); });
+  },
   resumeRetake(s: State, reportId: string) {
     const r = s.reports.find((x) => x.id === reportId); if (!r) return;
     r.input.quality = "brandOnly"; r.input.lowConfidence = true;
@@ -388,19 +408,217 @@ function seedReport(s: State, who: string, placeId: string, presetId: string, ho
   return r;
 }
 
+type Stage = "assigned" | "contacted" | "visited" | "offer" | "sent" | "won" | "lost" | "notinterested" | "hold" | "declined";
+const ORDER: Stage[] = ["assigned", "contacted", "visited", "offer", "sent"];
+const SITE: Omit<SiteVisit, "by" | "at"> = { met: { name: "Ramesh Gupta", role: "Facility manager", phone: "+91 98480 22110" }, lifts: "3", floors: "12", condition: "Worn but running", decision: "Facility manager with the owner", timeline: "This quarter", competitor: "Local firm", note: "Unhappy with response times from the current servicer." };
+
+/** Runs at a moment in the past, so seeded logs and timelines read like real history. */
+function at(s: State, hoursAgo: number, fn: () => void) { const saved = s.clock; s.clock = -hoursAgo * H; fn(); s.clock = saved; }
+
+/** Moves one Snap & Lead sales lead and its SHERPA opportunity together, the way the desk screens do. */
+function drive(s: State, r: Report, goal: Stage, track?: string) {
+  const it = r.items.find((i) => i.kind === "lead" && !i.silent && i.team !== "AM" && (!track || i.track === track)); if (!it) return;
+  const opp = s.sherpa.opps.find((o) => o.source.itemId === it.id);
+  const owner = it.ownerId ?? opp?.suggested; if (!owner) return;
+  const span = (Date.now() - r.createdAt) / H; const steps = goal === "declined" ? 1 : (ORDER.indexOf(goal as Stage) + 1 || ORDER.length + 1);
+  const when = (k: number) => Math.max(0.2, span - (span * (k + 1)) / (steps + 1));
+  if (goal === "declined") return at(s, when(0), () => A.decline(s, it.id, owner, "Not my customer segment"));
+  at(s, when(0), () => { if (opp) OP.review(s, opp.id, "marc", { owner, technician: techFor(r.area) }); A.accept(s, it.id, owner); });
+  if (steps < 2) return;
+  if (["notinterested", "hold"].includes(goal)) return at(s, when(1), () => { A.contact(s, it.id, owner, "Phone call: spoke to the facility manager"); A.outcome(s, it.id, owner, goal as "notinterested" | "hold"); });
+  at(s, when(1), () => A.contact(s, it.id, owner, "Phone call: the facility manager is open to a meeting"));
+  if (steps < 3) return;
+  at(s, when(2), () => { if (opp) OP.siteVisit(s, opp.id, techFor(r.area), SITE); A.visit(s, it.id, owner, "Met the facility manager and checked the lifts"); });
+  if (steps < 4) return;
+  at(s, when(3), () => { if (opp) OP.setupDeal(s, opp.id, owner, { accountId: opp.accountId ?? "new", path: "direct" }); });
+  if (steps < 5) return;
+  const of = () => s.sherpa.offers.find((o) => o.id === s.sherpa.opps.find((x) => x.source.itemId === it.id)?.offerId);
+  at(s, when(4), () => {
+    const o = of();
+    if (o) { o.missing = undefined; SH.submit(s, o.id, owner); o.approvals.filter((x) => x.status === "pending").forEach((x) => SH.decide(s, o.id, x.by, "approved", "Within the region price reference")); SH.send(s, o.id, owner, { subject: `Your offer for ${r.placeName}`, body: "Please find our offer attached." }); }
+    A.quote(s, it.id, owner, "Offer sent to the customer");
+  });
+  if (goal === "won" || goal === "lost") at(s, when(5), () => { const o = of(); if (o) SH.outcome(s, o.id, owner, goal, goal === "lost" ? "Competitor offer" : undefined); A.outcome(s, it.id, owner, goal); });
+}
+
+type NiGoal = "accept" | "research" | "talk" | "callback" | "notinterested" | "quoteBrief" | "quoteApproval" | "quoteSent" | "tenderDetails" | "tenderBid" | "bidReview" | "bidConfirm" | "bidSent" | "agreed" | "order" | "job" | "done" | "lost";
+const NI_STEPS: Record<NiGoal, [number, number]> = {
+  accept: [1, 1], research: [3, 3], talk: [3, 3], callback: [4, 4], notinterested: [4, 4], quoteBrief: [4, 4], quoteApproval: [6, 6], quoteSent: [7, 7], lost: [8, 10],
+  tenderDetails: [4, 4], tenderBid: [5, 5], bidReview: [6, 6], bidConfirm: [7, 7], bidSent: [9, 9], agreed: [8, 10], order: [9, 11], job: [10, 12], done: [11, 13],
+};
+
+/** A building-site report under its own name, so new-installation deals are spread over the map. */
+function siteReport(s: State, who: string, name: string, area: string, geo: { lat: number; lng: number }, preset: string, hoursAgo: number, edit?: (i: Input) => void) {
+  const pr = PRESETS.find((x) => x.id === preset)!;
+  const input = presetToInput(pr, "harbour"); edit?.(input);
+  const at = Date.now() - hoursAgo * H; const saved = s.clock; s.clock = at - Date.now();
+  const r = createReport(s, { reporterId: who, input, photos: photosFor("site"), placeId: "harbour", placeName: name, area, answers: [], corrections: [], at });
+  s.clock = saved;
+  s.sherpa.opps.filter((o) => o.source.reportId === r.id).forEach((o) => { o.geo = geo; o.accountId = undefined; });
+  return r;
+}
+
+/** Moves a new-installation lead through the flow: review, accept, contact, quote or tender, order, handover. */
+function driveNI(s: State, r: Report, goal: NiGoal, opt: { tender?: boolean; research?: boolean } = {}) {
+  const it = r.items.find((i) => i.kind === "lead" && !i.silent && i.team !== "AM"); if (!it) return;
+  const opp = s.sherpa.opps.find((o) => o.source.itemId === it.id); if (!opp) return;
+  const owner = it.ownerId ?? opp.suggested; if (!owner) return;
+  const id = opp.id; const tender = opt.tender || ["tenderDetails", "tenderBid", "bidReview", "bidConfirm", "bidSent"].includes(goal);
+  const end = NI_STEPS[goal][tender ? 1 : 0];
+  const span = (Date.now() - r.createdAt) / H;
+  let k = 0; const step = (fn: () => void) => { k++; if (k > end) return false; at(s, Math.max(0.2, span - (span * k) / (end + 1)), fn); return true; };
+  const contact = { name: "K. Prakash", role: "Project director", phone: "+91 98480 41207" };
+  if (!step(() => OP.review(s, id, "marc", { owner }))) return;
+  if (!step(() => { A.accept(s, it.id, owner); OP.accepted(s, id, owner); })) return;
+  if (!step(() => {
+    const o = s.sherpa.opps.find((x) => x.id === id)!;
+    if (o.contact && !opt.research) return;
+    OP.research(s, id, owner, tender ? ["Contact details", "Tender document", "Project owner"] : ["Contact details", "Project owner"]);
+  })) return;
+  const research = s.sherpa.tasks.find((t) => t.oppId === id && t.kind === "research" && !t.done);
+  if (research && goal !== "research") at(s, Math.max(0.2, span - (span * (k + 0.5)) / (end + 1)), () => OP.shareResearch(s, research.id, "shalini", tender ? ["permit", "owner", "tender"] : ["permit", "owner"]));
+  const wants = { lifts: "4", floors: "G+14", when: "Within 3 months" };
+  const outcome = goal === "callback" ? "callback" : goal === "notinterested" ? "notInterested" : tender ? "tender" : "quote";
+  if (!step(() => {
+    A.contact(s, it.id, owner, outcome === "notInterested" ? "Phone call: the developer has already chosen a supplier" : "Phone call: the project director wants prices");
+    OP.talk(s, id, owner, { how: outcome === "callback" ? "Phone call" : "Site visit", with: contact, said: outcome === "callback" ? "Busy with the slab work. Asked us to call back next week." : outcome === "notInterested" ? "They signed with another lift company last month." : tender ? "They issued a formal tender to three lift companies." : "Wants a direct quote for 4 passenger lifts.", wants, outcome, callbackDays: 7, reason: "Already chose another supplier", eordDays: 30 });
+    if (outcome === "notInterested") A.outcome(s, it.id, owner, "notinterested");
+  })) return;
+  const o = () => s.sherpa.opps.find((x) => x.id === id)!;
+  const of = () => offerOf(s, o().offerId);
+  if (tender) {
+    if (!step(() => { const t = tenderOf(s, o().tenderId); if (!t) return; if (!t.doc) OP.tenderDoc(s, t.id, "shalini", { name: "tender-document.pdf", size: 820000 }); OP.answerGaps(s, t.id, "shalini", Object.fromEntries((t.doc?.gaps ?? []).map((g) => [g.key, g.opts[0]]))); })) return;
+    if (!step(() => { const t = tenderOf(s, o().tenderId); if (t) { OP.fillPapers(s, t.id, "marc"); OP.bidDone(s, t.id, "marc", 8); } })) return;
+    if (!step(() => OP.bidReviewed(s, id, "shalini", true, "Payment terms and papers in order"))) return;
+    if (!step(() => OP.bidConfirmed(s, id, owner, true))) return;
+  } else {
+    if (!step(() => OP.quoteBrief(s, id, owner, { floors: "15", load: "1,000 kg (13 persons)", speed: "1.75 m/s", finish: "Stainless steel", timeline: "Within 3 months", extras: "" }))) return;
+    if (!step(() => { const f = of(); if (f) { SH.setTerms(s, f.id, owner, { discountPct: 14 }); SH.submit(s, f.id, owner); } })) return;
+  }
+  if (!step(() => { const f = of(); if (!f) return; if (f.status === "awaiting") SH.decide(s, f.id, "marc", "approved", "In line with recent wins in the area"); SH.send(s, f.id, owner, { subject: `Our ${tender ? "bid" : "quotation"} for ${r.placeName}`, body: "Please find it attached." }); A.quote(s, it.id, owner, tender ? "Bid sent to the customer" : "Quotation sent to the customer"); })) return;
+  if (goal === "lost") { step(() => { const f = of(); if (f) SH.outcome(s, f.id, owner, "lost", "Competitor offer was 9% lower"); }); return; }
+  if (!step(() => { const f = of(); OP.agreed(s, id, owner, { price: f?.price ?? 0, start: Date.now() + s.clock + 45 * 86400000, how: "Signed letter of intent", proof: "letter-of-intent.pdf" }); })) return;
+  if (!step(() => OP.winDecision(s, id, "marc", true))) return;
+  if (!step(() => OP.createOrder(s, id, "shalini", { number: `SO-${4400 + s.sherpa.seq}`, delivery: Date.now() + s.clock + 120 * 86400000, payment: "10% advance, 60% on delivery, 30% on handover" }))) return;
+  step(() => OP.acceptJob(s, id, serviceLeadFor(r.area) ?? "srikanth", { start: Date.now() + s.clock + 60 * 86400000, siteContact: { name: "B. Ramana", phone: "+91 90000 31415" } }));
+}
+
+/** Leads at every stage of both pipelines, so each screen has realistic work in it. */
+function seedPipeline(s: State) {
+  const item = (r: Report, kind: string) => r.items.find((i) => i.kind === kind)!;
+  const add = (who: string, place: string, preset: string, h: number, edit?: (i: Input) => void) => seedReport(s, who, place, preset, h, edit);
+  const fine = (i: Input) => { i.condition = "fine"; };
+
+  // Sales pipeline, one lead per stage
+  add("alex", "secbiz", "K1", 1.5, fine);
+  drive(s, add("alex", "citymall", "C3", 40, fine), "assigned");
+  drive(s, add("alex", "riverside", "C6", 75, (i) => { i.condition = "out"; }), "contacted");
+  drive(s, add("alex", "baselhosp", "C8", 130, fine), "visited");
+  drive(s, add("tom", "secbiz", "C10", 170, fine), "offer");
+  drive(s, add("alex", "secbiz", "C2", 210, fine), "sent");
+  drive(s, add("alex", "baselhosp", "C11", 420, fine), "won");
+  drive(s, add("alex", "citymall", "C15", 320, fine), "lost");
+  drive(s, add("tom", "riverside", "M10", 260, fine), "notinterested");
+  drive(s, add("alex", "secbiz", "B7", 100, fine), "hold");
+  drive(s, add("tom", "baselhosp", "C4", 55, fine), "declined");
+
+  // Renewals and win-backs
+  drive(s, add("alex", "techpark", "B6", 90, fine), "contacted");
+  drive(s, add("tom", "station", "M6", 190, fine), "sent");
+  drive(s, add("alex", "secbiz", "B8", 66, fine), "assigned");
+  drive(s, add("alex", "station", "M7", 460, fine), "won");
+  drive(s, add("tom", "cityhall", "B9", 380, fine), "lost");
+  drive(s, add("tom", "secbiz", "B5", 410, fine), "lost");
+  drive(s, add("tom", "riverside", "B8", 120, fine), "sent");
+
+  // Key customer: renewal in progress and the account manager adds it to the plan
+  const key = add("alex", "techpark", "B19", 280, fine);
+  drive(s, key, "visited", "renewal");
+  const am = key.items.find((i) => i.team === "AM"); if (am) at(s, 270, () => A.accountPlan(s, am.id, "lena"));
+
+  // Modernisation, two leads from one photo at different stages
+  const mod = add("alex", "riverside", "C7", 150, (i) => { i.condition = "minor"; });
+  drive(s, mod, "visited", "modernisation"); drive(s, mod, "contacted", "sales");
+  const mod2 = add("tom", "techpark", "C7", 360, (i) => { i.condition = "minor"; });
+  drive(s, mod2, "sent", "modernisation"); drive(s, mod2, "lost", "sales");
+  const m13 = add("tom", "citymall", "M13", 520, (i) => { i.condition = "minor"; });
+  drive(s, m13, "won", "modernisation"); drive(s, m13, "lost", "sales");
+
+  // New installations: one deal at every step of the flow
+  const site = (who: string, name: string, area: string, lat: number, lng: number, h: number, preset = "D1") => siteReport(s, who, name, area, { lat, lng }, preset, h, (i) => { if (preset === "D1") { i.stage = "structure"; i.ordered = false; } });
+  driveNI(s, site("alex", "Narsingi Greens (building site)", "HYW", 17.384, 78.357, 20, "D4"), "accept");
+  driveNI(s, site("alex", "Tellapur Grand (building site)", "HYW", 17.465, 78.283, 30), "research", { tender: true, research: true });
+  driveNI(s, site("tom", "Manikonda Residency (building site)", "HYW", 17.402, 78.384, 44), "talk", { research: true });
+  driveNI(s, site("alex", "Puppalaguda Heights (building site)", "HYW", 17.389, 78.371, 70), "callback");
+  driveNI(s, site("tom", "Gandipet Villas (building site)", "HYW", 17.391, 78.31, 140), "notinterested");
+  driveNI(s, site("alex", "Kondapur Crest (building site)", "HYW", 17.47, 78.364, 60), "quoteBrief");
+  driveNI(s, site("alex", "Uppal Metro Plaza (building site)", "SEC", 17.401, 78.559, 96), "quoteApproval");
+  driveNI(s, add("alex", "harbour", "M15", 240, () => undefined), "quoteSent");
+  driveNI(s, site("tom", "Financial District Tower 4 (building site)", "HYW", 17.414, 78.341, 52), "tenderDetails");
+  driveNI(s, site("alex", "Nanakramguda One (building site)", "HYW", 17.417, 78.348, 110), "tenderBid");
+  driveNI(s, site("alex", "Begumpet Square (building site)", "HYC", 17.444, 78.462, 150), "bidReview");
+  driveNI(s, site("tom", "Malkajgiri Central (building site)", "SEC", 17.457, 78.527, 175), "bidConfirm");
+  driveNI(s, site("alex", "Kompally Signature (building site)", "SEC", 17.536, 78.484, 300), "bidSent");
+  driveNI(s, site("alex", "Shamshabad Gateway (building site)", "HYC", 17.24, 78.43, 360), "agreed");
+  driveNI(s, site("tom", "Miyapur Orchid Towers (building site)", "HYW", 17.496, 78.357, 420), "order");
+  driveNI(s, site("alex", "Bachupally Meadows (building site)", "HYW", 17.545, 78.36, 500), "job", { tender: true });
+  driveNI(s, add("tom", "harbour", "D1", 600, (i) => { i.stage = "finishing"; i.ordered = false; i.contact = true; }), "done");
+  driveNI(s, site("alex", "Attapur Riverfront (building site)", "HYC", 17.37, 78.43, 480), "lost");
+  site("tom", "Attapur Riverfront (building site)", "HYC", 17.371, 78.431, 6, "D4");
+  add("alex", "cityhall", "C9", 46);
+
+  // Faults on lifts we maintain
+  const f1 = add("alex", "cityhall", "B3", 20, (i) => { i.condition = "out"; });
+  at(s, 18, () => A.assignEngineer(s, item(f1, "ticket").id, "jonas", "Suresh K."));
+  const f2 = add("alex", "techpark", "B2", 180, (i) => { i.condition = "minor"; });
+  at(s, 176, () => A.accept(s, item(f2, "ticket").id, "jonas")); at(s, 150, () => A.closeTicket(s, item(f2, "ticket").id, "jonas", "Door sensor replaced"));
+  const f3 = add("tom", "secbiz", "M4", 8, (i) => { i.condition = "minor"; });
+  at(s, 6, () => A.accept(s, item(f3, "ticket").id, "jonas"));
+
+  // Emergencies at every step
+  const e1 = add("alex", "station", "M2", 7, (i) => { i.condition = "unsafe"; i.hurt = "no"; });
+  at(s, 6.8, () => A.dispatch(s, item(e1, "emergency").id, "dimitri"));
+  const e3 = add("tom", "riverside", "A2", 2, (i) => { i.condition = "unsafe"; i.hurt = "no"; });
+  at(s, 1.8, () => A.ack(s, item(e3, "emergency").id, "dimitri"));
+  const e2 = add("tom", "secbiz", "A2", 340, (i) => { i.condition = "unsafe"; i.hurt = "no"; });
+  at(s, 339.8, () => A.dispatch(s, item(e2, "emergency").id, "dimitri")); at(s, 336, () => A.closeEmergency(s, item(e2, "emergency").id, "dimitri"));
+
+  // Records: waiting, checking, added, corrected, rejected as scrapped
+  add("alex", "secbiz", "B16", 3, fine);
+  const rc1 = add("tom", "station", "M8", 28, fine); at(s, 24, () => A.accept(s, item(rc1, "records").id, "priya"));
+  const rc2 = add("alex", "baselhosp", "B14", 230, fine); at(s, 200, () => A.records(s, item(rc2, "records").id, "priya", "create"));
+  const rc3 = add("alex", "cityhall", "E12", 300, fine); at(s, 280, () => A.records(s, item(rc3, "records").id, "priya", "correct"));
+  const rc4 = add("tom", "riverside", "B18", 160, fine); at(s, 150, () => A.records(s, item(rc4, "records").id, "priya", "scrapped"));
+
+  // Already known, information only, retake and offline
+  add("alex", "riverside", "G1", 12, fine);
+  add("tom", "citymall", "G7", 15, fine);
+  add("alex", "geneva", "D8", 350, fine);
+  add("alex", "secbiz", "M3", 80, fine);
+  add("alex", "station", "E4", 0.6);
+  s.offline = true; add("alex", "secbiz", "J1", 0.3, fine); s.offline = false;
+
+  // Bonuses the reporter already added
+  const withExtras = s.reports.find((r) => r.reporterId === "alex" && r.placeId === "baselhosp" && r.items.some((i) => i.status === "closed"));
+  if (withExtras) { withExtras.extras.contact = "Dr. Anitha Rao · +91 94403 55120"; withExtras.extras.note = "Hospital board approved a lift upgrade budget for next year."; }
+}
+
+leadHooks.quoted = (s, itemId, by) => { const f = findItem(s, itemId); if (f && f[1].status !== "closed") A.quote(s, itemId, by); };
+leadHooks.closed = (s, itemId, by, result) => { const f = findItem(s, itemId); if (f && f[1].status !== "closed") A.outcome(s, itemId, by, result); };
+
 export function seed(): State {
   const s: State = { reports: [], alerts: [], audit: [], cfg: structuredClone(DEFAULT_CFG), clock: 0, offline: false, userId: null, seq: 100, sherpa: seedSherpa(), v: STATE_VERSION };
   const adv = (h: number) => { s.clock += h * H; };
   // 1: Alex, Riverside, local-firm lift, accepted + contacted ("In progress")
   const r1 = seedReport(s, "alex", "riverside", "C1", 2, (i) => { i.age = 18; i.condition = "minor"; i.units = 3; i.contact = true; });
   s.clock = 0;
-  const l1 = r1.items.find((x) => x.kind === "lead")!; A.accept(s, l1.id, "ethan"); A.contact(s, l1.id, "ethan", "Called the building manager");
+  const l1 = r1.items.find((x) => x.kind === "lead")!; at(s, 1.5, () => A.accept(s, l1.id, "ethan")); at(s, 0.7, () => A.contact(s, l1.id, "ethan", "Called the building manager"));
   // 2: Alex, City Mall, renewal won yesterday
   const r2 = seedReport(s, "alex", "citymall", "B5", 30, (i) => { i.condition = "fine"; });
-  const l2 = r2.items.find((x) => x.kind === "lead")!; A.accept(s, l2.id, "sofia"); A.outcome(s, l2.id, "sofia", "won");
+  const l2 = r2.items.find((x) => x.kind === "lead")!; at(s, 27, () => A.accept(s, l2.id, "sofia")); at(s, 20, () => A.outcome(s, l2.id, "sofia", "won"));
   // 3: Alex, Tech Park, missing lift in records (records update)
   const r3 = seedReport(s, "alex", "techpark", "B13", 48, (i) => { i.condition = "fine"; });
-  A.accept(s, r3.items.find((x) => x.kind === "records")!.id, "priya");
+  at(s, 40, () => A.accept(s, r3.items.find((x) => x.kind === "records")!.id, "priya"));
   // 4: Tom, minor fault ours
   seedReport(s, "tom", "riverside", "B2", 3, (i) => { i.condition = "minor"; });
   // 5: Tom, building site Hot, 50h without action
@@ -417,12 +635,22 @@ export function seed(): State {
   seedReport(s, "alex", "riverside", "B12", 6, (i) => { i.condition = "minor"; i.age = 26; });
   // 11: declined lead -> manager list
   const r11 = seedReport(s, "tom", "citymall", "C1", 20, (i) => { i.condition = "fine"; });
-  const l11 = r11.items.find((x) => x.kind === "lead")!; A.decline(s, l11.id, "elias", "Wrong area");
+  const l11 = r11.items.find((x) => x.kind === "lead")!; at(s, 16, () => A.decline(s, l11.id, "elias", "Wrong area"));
   // 12: old photo, points held
   seedReport(s, "tom", "riverside", "E10", 9, (i) => { i.condition = "fine"; });
   // 13: records fix + proposed merge waiting for manager
   const r13 = seedReport(s, "alex", "techpark", "B17", 10, (i) => { i.condition = "fine"; });
-  A.records(s, r13.items.find((x) => x.kind === "records")!.id, "priya", "merge");
+  at(s, 7, () => A.records(s, r13.items.find((x) => x.kind === "records")!.id, "priya", "merge"));
+  // 14: the manager already qualified one lead, so the technician has a visit waiting
+  const v = s.sherpa.opps.find((o) => o.stage === "review" && o.kind === "existing" && o.suggested);
+  if (v?.source.itemId && v.suggested) { A.reassign(s, [v.source.itemId], v.suggested, "marc"); A.accept(s, v.source.itemId, v.suggested); OP.review(s, v.id, "marc", { owner: v.suggested, technician: techFor(v.area), note: "The reporter says the building is unhappy with its servicer. Please go this week." }); }
+  // 15: a renewal the customer accepted, so its contract draft is waiting for the rep
+  SH.outcome(s, "OF-901", "ethan", "won");
+  // 16: a key account with a plan in progress
+  AC.setGoal(s, "deccan", "lena", "Keep all three lines and win the Tower 2 modernisation before the contract ends.");
+  AC.addAction(s, "deccan", "lena", "Quarterly review with Anand Rao", "lena", 5);
+  AC.addAction(s, "deccan", "lena", "Survey Tower 2 lift for modernisation", "ethan", 10);
+  seedPipeline(s);
   s.clock = 0; adv(0); tick(s);
   s.alerts.forEach((a) => { if (a.t < Date.now() - 4 * H) a.read = true; });
   return s;

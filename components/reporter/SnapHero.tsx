@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { Bot, Icon } from "../ui";
 
 /** First thing in the chat: the photo-to-lead entry. */
@@ -11,7 +12,7 @@ export function SnapHero({ onSnap }: { onSnap: () => void }) {
         <div className="mx-auto mt-4 grid max-w-sm grid-cols-3 gap-2 text-[12px] text-muted">
           {[["camera", "Up to 6 photos"], ["bolt", "AI reads the details"], ["flag", "Creates the right lead"]].map(([i, t]) => <div key={t} className="flex flex-col items-center gap-1.5"><span className="grid h-10 w-10 place-items-center rounded-full bg-white text-brand ring-1 ring-line"><Icon n={i} s={18} /></span>{t}</div>)}
         </div>
-        <button onClick={onSnap} className="mx-auto mt-5 inline-flex min-h-11 w-full max-w-sm items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"><Icon n="camera" s={17} /> Take or upload photos</button>
+        <Button onClick={onSnap} className="mx-auto mt-5 flex h-11 w-full max-w-sm gap-2 px-4"><Icon n="camera" s={17} /> Take or upload photos</Button>
       </div>
     </div>
   );

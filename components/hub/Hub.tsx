@@ -7,7 +7,9 @@ import { Icon, ago } from "../ui";
 import { Sherpa, type Seed } from "../desk/Sherpa";
 import { OppPage, statusLine } from "../desk/Opps";
 import { involvedOpps } from "./parts";
-import { OwnerDot, Stat2, StatRow, T, Line, pageList } from "../shared";
+import { Drawer, FilterBar, FilterField, OwnerDot, Stat2, StatRow, T, Line, pageList } from "../shared";
+import { Check, Choice } from "@/components/form";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 
 /* ------------------------------------------------------------------ Chat: the home screen */
 export function ChatHome({ seed, openOpp, openOffer, go, compact }: { compact?: boolean; seed: Seed | null; openOpp: (id: string) => void; openOffer: (id: string) => void; go: (v: string) => void }) {
@@ -27,14 +29,14 @@ const KIND_T = { newbuild: T.blue, existing: T.purple, renewal: T.green, moderni
 export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string | null; setOpenId: (id: string | null) => void; openOffer: (id: string) => void; onAsk: (o: Opp) => void }) {
   const { s, me, now } = useApp();
   const [tab, setTab] = useState<Tab>("needs"); const [q, setQ] = useState(""); const [kindF, setKindF] = useState("all"); const [stageF, setStageF] = useState("all"); const [areaF, setAreaF] = useState("all"); const [page, setPage] = useState(1);
-  const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: "due", d: 1 });
+  const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: "updated", d: -1 });
   const ALL_COLS = { type: true, stage: true, move: true, value: true, owner: true, updated: true };
-  const [vis, setVis] = useState(ALL_COLS); const [panel, setPanel] = useState(false);
+  const [vis, setVis] = useState(ALL_COLS);
   const [checked, setChecked] = useState<string[]>([]); const [view, setView] = useState<"list" | "grid">("list"); const [menu, setMenu] = useState<string | null>(null);
-  const box = useRef<HTMLDivElement>(null); const [wide, setWide] = useState(false); const [narrow, setNarrow] = useState(false);
-  useEffect(() => { const el = box.current; if (!el) return; const ro = new ResizeObserver(() => { setWide(el.clientWidth >= 1200); setNarrow(el.clientWidth < 640); }); ro.observe(el); return () => ro.disconnect(); }, []);
+  const box = useRef<HTMLDivElement>(null); const [wide, setWide] = useState(false);
+  useEffect(() => { const el = box.current; if (!el) return; const ro = new ResizeObserver(() => { setWide(el.clientWidth >= 1200); }); ro.observe(el); return () => ro.disconnect(); }, []);
   const all = involvedOpps(s, me!.id, me!.role);
-  const needs = (o: Opp) => isOpen(o) && tasksOfOpp(s, o.id).some((t) => t.forUser === me!.id);
+  const needs = (o: Opp) => tasksOfOpp(s, o.id).some((t) => t.forUser === me!.id);
   const lists: Record<Tab, Opp[]> = {
     needs: all.filter(needs),
     waiting: all.filter((o) => isOpen(o) && !needs(o) && (tasksOfOpp(s, o.id).length > 0 || o.stage === "sent")),
@@ -60,7 +62,6 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
   const resetAll = () => { setTab("needs"); setQ(""); setKindF("all"); setStageF("all"); setAreaF("all"); setPage(1); setVis(ALL_COLS); };
   const sortBy = (k: string) => setSort((p) => ({ k, d: p.k === k ? (p.d === 1 ? -1 : 1) : 1 }));
   const th = (k: string | undefined, children: React.ReactNode) => k ? <button onClick={() => sortBy(k)} className="inline-flex items-center gap-1 text-left t-label hover:text-ink">{children}<span className={sort.k === k ? "text-ink" : "opacity-50"}>⇅</span></button> : <span className="t-label">{children}</span>;
-  const sel2 = "min-h-10 rounded-md border border-line bg-white px-3 text-[13px] text-ink outline-none focus:border-brand";
   const allChecked = shown.length > 0 && shown.every((o) => checked.includes(o.id));
   const tick = (id: string) => setChecked((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
   const go = (t: Tab) => { setTab(t); setPage(1); };
@@ -70,50 +71,32 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
   const stageTag = (o: Opp) => <span className="inline-flex items-center gap-2 text-[13px] font-medium"><span className="h-2 w-2 rounded-full" style={{ background: stageDot(o) }} />{stageOf(o)}</span>;
   const tile = (o: Opp) => { const kt = KIND_T[o.kind]; return <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md" style={{ background: kt.bg, color: kt.fg }}><Icon n={o.kind === "newbuild" || o.kind === "project" ? "layers" : o.kind === "renewal" ? "shield" : o.kind === "modernisation" ? "gear" : "pin"} s={18} /></span>; };
   const check = (on: boolean, fn: (e: React.MouseEvent) => void) => <span role="checkbox" aria-checked={on} onClick={fn} className={`grid h-[18px] w-[18px] cursor-pointer place-items-center rounded-sm border ${on ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{on && <Icon n="check" s={12} w={3} />}</span>;
-  useEffect(() => { if (open && narrow) box.current?.closest("main")?.scrollTo(0, 0); }, [open, narrow]);
   const askAbout = (o: Opp) => <button onClick={() => { setOpenId(null); onAsk(o); }} className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap @md:flex-none rounded-md border border-brand bg-white px-4 text-[13.5px] font-semibold text-brand hover:bg-brand-soft"><Icon n="sparkle" s={15} /> Ask SHERPA about this</button>;
   return (
     <div ref={box} className="@container w-full">
-      {open && narrow ? (
-        <div className="flex min-h-full w-full flex-col bg-surface">
-          <div className="sticky top-0 z-10 shrink-0 border-b border-line bg-white px-4 pb-3 pt-2.5">
-            <button onClick={() => setOpenId(null)} className="-ml-1.5 mb-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium text-ink/70 hover:bg-surface hover:text-ink"><Icon n="back" s={15} /> My work</button>
-            <div className="t-label">Opportunity · {open.id}</div><div className="text-[18px] font-semibold leading-tight">{open.title}</div>
-          </div>
-          <div className="@container flex-1"><OppPage embedded id={open.id} onBack={() => setOpenId(null)} openOffer={openOffer} /></div>
-          <div className="sticky bottom-0 flex shrink-0 border-t border-line bg-white px-4 py-3">{askAbout(open)}</div>
-        </div>
-      ) : (
     <div className="p-4 @3xl:p-6">
-      <h1 className="text-[28px] font-semibold leading-tight tracking-tight">My work</h1>
-      <p className="t-small mt-0.5">Every lead, tender and offer is one opportunity. Click a row for the full detail, or press Ask to work on it with SHERPA.</p>
+      <h1 className="text-[28px] font-semibold leading-tight tracking-tight">{me!.role === "tech" ? "My site visits" : me!.role === "sl" ? "My jobs" : "My work"}</h1>
+      <p className="t-small mt-0.5">{me!.role === "tech" ? "Sites the Sales Manager sent you to. Open one, meet the person in charge and file the site-visit report." : me!.role === "sl" ? "Won new installations in your area. Open one, read the handover pack and accept the job." : "Every lead, tender and offer is one opportunity. Click a row for the full detail, or press Ask to work on it with SHERPA."}</p>
       <StatRow>
         <Stat2 icon="warn" label="Needs my action" value={lists.needs.length} tone={T.orange} active={tab === "needs"} onClick={() => go("needs")} />
         <Stat2 icon="clock" label="Waiting on others" value={lists.waiting.length} tone={T.blue} active={tab === "waiting"} onClick={() => go("waiting")} />
         <Stat2 icon="layers" label="All active" value={lists.active.length} tone={T.red} active={tab === "active"} onClick={() => go("active")} />
         <Stat2 icon="check" label="Closed" value={lists.closed.length} tone={T.green} active={tab === "closed"} onClick={() => go("closed")} />
-        <Stat2 icon="star" label="Open pipeline" value={<span className="whitespace-nowrap text-[19px]" title={inr(pipeline)}>{short(pipeline)}</span>} tone={T.gold} />
+        {me!.role !== "tech" && <Stat2 icon="star" label="Open pipeline" value={<span className="whitespace-nowrap text-[19px]" title={inr(pipeline)}>{short(pipeline)}</span>} tone={T.gold} />}
       </StatRow>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <label className="flex min-h-10 min-w-[14rem] flex-1 items-center gap-2 rounded-md border border-line bg-white px-3 text-muted focus-within:border-brand"><Icon n="search" s={15} /><input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by place, opportunity or ID…" className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-muted" /></label>
-        <select aria-label="Status" value={tab} onChange={(e) => go(e.target.value as Tab)} className={sel2}><option value="needs">Needs my action</option><option value="waiting">Waiting on others</option><option value="active">All active</option><option value="closed">Closed</option></select>
-        <select aria-label="Type" value={kindF} onChange={(e) => { setKindF(e.target.value); setPage(1); }} className={sel2}><option value="all">Type</option>{kinds.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select>
-        <select aria-label="Stage" value={stageF} onChange={(e) => { setStageF(e.target.value); setPage(1); }} className={sel2}><option value="all">Stage</option>{stagesUsed.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-        <select aria-label="My area" value={areaF} onChange={(e) => { setAreaF(e.target.value); setPage(1); }} className={sel2}><option value="all">My Area</option>{areas.map((x) => <option key={x} value={x}>{area(x)}</option>)}</select>
-        <div className="relative">
-          <button aria-label="Columns and filters" onClick={() => setPanel(!panel)} className={`grid h-10 w-10 place-items-center rounded-md border bg-white ${panel ? "border-brand text-brand" : "border-line text-ink/70 hover:bg-surface"}`}><Icon n="sliders" s={17} /></button>
-          {panel && <>
-            <button aria-label="Close" className="fixed inset-0 z-30" onClick={() => setPanel(false)} />
-            <div className="float pop absolute right-0 top-12 z-40 w-60 rounded-md border border-line bg-white p-3">
-              <div className="t-label mb-2">Columns</div>
-              <div className="space-y-1">{colKeys.map((k) => <label key={k} className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 text-[13.5px] hover:bg-surface"><input type="checkbox" checked={vis[k]} onChange={() => setVis({ ...vis, [k]: !vis[k] })} className="h-4 w-4 accent-[#d42a2a]" />{colLabel[k]}</label>)}</div>
-              <button onClick={() => { resetAll(); setPanel(false); }} className="mt-3 w-full rounded-md border border-line px-3 py-2 text-[13px] font-medium hover:bg-surface">Reset filters and columns</button>
-            </div>
-          </>}
-        </div>
-        <div className="flex overflow-hidden rounded-md border border-line bg-white">
-          {([["list", "list"], ["grid", "layers"]] as const).map(([v, ic]) => <button key={v} aria-label={v} onClick={() => setView(v)} className={`grid h-10 w-11 place-items-center ${view === v ? "bg-brand-soft text-brand" : "text-ink/60 hover:bg-surface"}`} style={view === v ? { boxShadow: "inset 0 0 0 1.5px var(--color-brand)" } : undefined}><Icon n={ic} s={17} /></button>)}
-        </div>
+      <div className={`mt-4 flex-wrap items-center gap-2 ${me!.role === "tech" ? "hidden" : "flex"}`}>
+        <InputGroup className="h-10 min-w-[14rem] flex-1 bg-white"><InputGroupAddon><Icon n="search" s={15} /></InputGroupAddon><InputGroupInput value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by place, opportunity or ID…" aria-label="Search" /></InputGroup>
+        <FilterBar alignRight onReset={resetAll} active={[
+          ...(kindF !== "all" ? [{ label: "Type", value: KIND_LABEL[kindF as Opp["kind"]], clear: () => setKindF("all") }] : []),
+          ...(stageF !== "all" ? [{ label: "Stage", value: STAGES.find((x) => x[0] === stageF)?.[1] ?? stageF, clear: () => setStageF("all") }] : []),
+          ...(areaF !== "all" ? [{ label: "Area", value: area(areaF), clear: () => setAreaF("all") }] : []),
+        ]}>
+          <FilterField label="Type"><Choice value={kindF} onChange={(v) => { setKindF(v); setPage(1); }} options={[{ value: "all", label: "All types" }, ...kinds.map((k) => ({ value: k, label: KIND_LABEL[k] }))]} aria-label="Type" /></FilterField>
+          <FilterField label="Stage"><Choice value={stageF} onChange={(v) => { setStageF(v); setPage(1); }} options={[{ value: "all", label: "All stages" }, ...stagesUsed.map(([k, l]) => ({ value: k, label: l }))]} aria-label="Stage" /></FilterField>
+          <FilterField label="Area"><Choice value={areaF} onChange={(v) => { setAreaF(v); setPage(1); }} options={[{ value: "all", label: "All areas" }, ...areas.map((x) => ({ value: x, label: area(x) }))]} aria-label="Area" /></FilterField>
+          <div><span className="t-label mb-1 block">View</span><div className="flex overflow-hidden rounded-md border border-line">{([["list", "list", "List"], ["grid", "layers", "Cards"]] as const).map(([v, ic, l]) => <button key={v} onClick={() => setView(v)} className={`flex h-9 flex-1 items-center justify-center gap-1.5 text-[13px] ${view === v ? "bg-brand-soft font-semibold text-brand" : "text-ink/70 hover:bg-surface"}`}><Icon n={ic} s={15} />{l}</button>)}</div></div>
+          {wide && view === "list" && <div><span className="t-label mb-1 block">Columns</span><div className="grid grid-cols-2 gap-x-2">{colKeys.map((k) => <Check key={k} checked={vis[k]} onChange={() => setVis({ ...vis, [k]: !vis[k] })} className="rounded px-1 py-1.5 text-[13px] hover:bg-surface">{colLabel[k]}</Check>)}</div></div>}
+        </FilterBar>
       </div>
       {menu && <button aria-label="Close menu" className="fixed inset-0 z-30" onClick={() => setMenu(null)} />}
       {rows.length === 0 ? <div className="sheet mt-4 p-8 text-center text-sm text-muted">{tab === "needs" && !q && kindF === "all" && stageF === "all" && areaF === "all" ? "Nothing needs you right now." : "No opportunities match."}</div> : view === "grid" || !wide ? (
@@ -162,21 +145,8 @@ export function MyWork({ openId, setOpenId, openOffer, onAsk }: { openId: string
           )}
         </div>
       )}
-      {open && !narrow && (
-        <>
-          <button aria-label="Close" onClick={() => setOpenId(null)} className="fixed inset-0 z-40 bg-ink/35" />
-          <aside className="@container pop float fixed bottom-0 right-0 top-[var(--safe-top,0px)] z-50 flex w-full max-w-[40rem] flex-col border-l border-line bg-white pb-[var(--safe-bottom,0px)]">
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-3.5">
-              <div className="min-w-0"><div className="t-label">Opportunity · {open.id}</div><div className="truncate text-[17px] font-semibold leading-tight">{open.title}</div></div>
-              <button aria-label="Close" onClick={() => setOpenId(null)} className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={16} /></button>
-            </div>
-            <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto bg-surface"><OppPage embedded id={open.id} onBack={() => setOpenId(null)} openOffer={openOffer} /></div>
-            <div className="flex shrink-0 items-center gap-3 border-t border-line bg-white px-5 py-3"><span className="mr-auto hidden t-small @md:inline">Want a hand with this one?</span>{askAbout(open)}</div>
-          </aside>
-        </>
-      )}
+      {open && <Drawer label={`Opportunity · ${open.id}`} title={open.title} onClose={() => setOpenId(null)} footer={<><span className="mr-auto hidden t-small @md:inline">Want a hand with this one?</span>{askAbout(open)}</>}><OppPage embedded id={open.id} onBack={() => setOpenId(null)} openOffer={openOffer} /></Drawer>}
     </div>
-      )}
     </div>
   );
 }

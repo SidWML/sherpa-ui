@@ -35,7 +35,7 @@ export function Kpi({ label, value, sub, tone, onClick }: { label: string; value
 /** A compact table of to-dos. Same rows in the chat and on the My work tab. */
 export function TaskTable({ onOpen, limit = 5 }: { onOpen: (id: string) => void; limit?: number }) {
   const { s, me, now, mutate } = useApp();
-  const rows = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).sort((a, b) => a.due - b.due);
+  const rows = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).sort((a, b) => b.createdAt - a.createdAt);
   if (!rows.length) return <div className="flex items-center gap-2 rounded-xl border border-line bg-white p-3.5 text-[13px] text-emerald-800"><Icon n="check" s={15} /> Nothing is waiting on you. Nice work.</div>;
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-white">

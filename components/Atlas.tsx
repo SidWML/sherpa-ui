@@ -3,6 +3,7 @@ import { useState } from "react";
 import { CASES, DESK_HINTS, GROUPS, PRESETS } from "@/lib/data";
 import type { Preset } from "@/lib/types";
 import { Btn, Icon, Pill } from "./ui";
+import { Check, Input } from "@/components/form";
 
 export function Atlas({ onClose, onRun }: { onClose: () => void; onRun: (p: Preset) => void }) {
   const [g, setG] = useState("all");
@@ -11,7 +12,7 @@ export function Atlas({ onClose, onRun }: { onClose: () => void; onRun: (p: Pres
   const rows = CASES.filter((c) => (g === "all" || c[0][0] === g) && (!pilot || c[2] === 1) && (c[0] + c[1]).toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-surface">
-      <div className="mx-auto max-w-5xl p-4 md:p-8">
+      <div className="p-4 md:p-8">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Case atlas</h1>
@@ -20,10 +21,10 @@ export function Atlas({ onClose, onRun }: { onClose: () => void; onRun: (p: Pres
           <Btn v="ghost" onClick={onClose}><Icon n="x" s={16} /> Close</Btn>
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…" className="min-h-10 rounded-xl border border-line bg-white px-3 text-sm" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…" aria-label="Search cases" className="w-auto min-w-56" />
           <button onClick={() => setG("all")} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${g === "all" ? "bg-ink text-white" : "bg-white border border-line"}`}>All</button>
           {Object.entries(GROUPS).map(([k, v]) => <button key={k} onClick={() => setG(k)} title={v} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${g === k ? "bg-brand text-white" : "bg-white border border-line"}`}>{k}</button>)}
-          <label className="ml-auto flex items-center gap-2 text-xs font-medium"><input type="checkbox" className="accent-[#e3001b]" checked={pilot} onChange={(e) => setPilot(e.target.checked)} /> Pilot only</label>
+          <Check checked={pilot} onChange={setPilot} className="ml-auto text-xs font-medium">Pilot only</Check>
         </div>
         <div className="space-y-5">
           {Object.entries(GROUPS).filter(([k]) => g === "all" || g === k).map(([k, name]) => {

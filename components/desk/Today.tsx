@@ -26,11 +26,11 @@ export function Today({ onDo, onOpenOpp }: { onDo: (c: NbaCard) => void; onOpenO
   const open = offers.filter((o) => ["draft", "awaiting", "changes", "approved", "sent"].includes(o.status));
   const won = offers.filter((o) => o.status === "won");
   const waiting = s.sherpa.offers.filter((o) => o.status === "awaiting" && (me!.role === "mgr" ? o.approvals.some((x) => x.status === "pending" && x.by === me!.id) : o.createdBy === me!.id));
-  const myTasks = s.sherpa.tasks.filter((t) => !t.done && (t.forUser === me!.id || (!t.forUser && t.by === me!.id))).sort((x, y) => x.due - y.due);
+  const myTasks = s.sherpa.tasks.filter((t) => !t.done && (t.forUser === me!.id || (!t.forUser && t.by === me!.id))).sort((x, y) => y.createdAt - x.createdAt);
   const hour = new Date(now).getHours();
   const hello = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-8">
+    <div className="p-4 md:p-8">
       <div className="mb-6 flex items-center gap-4">
         <Ring done={doneToday} total={total} />
         <div>

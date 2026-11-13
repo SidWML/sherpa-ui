@@ -2,18 +2,25 @@
 import { useEffect, useRef, useState } from "react";
 import { A, pointsOf, stepsOf, useApp, userOf } from "@/lib/store";
 import { AREAS, PLACES, ROLE_LABEL, TEAM_NAME } from "@/lib/data";
-import type { Preset, Report } from "@/lib/types";
+import type { LeadInfo as LeadInfoT, Preset, Report } from "@/lib/types";
 import { levelOf, type NavItem } from "../Shell";
 import { Frame } from "../Frame";
 import { Alerts, Line, OwnerDot, Stat2, StatRow, T, pageList, type Tone } from "../shared";
 import { Assistant } from "./Assistant";
 import { QuickAsk } from "./QuickAsk";
 import { LeadMap } from "./LeadMap";
+import { Gallery, InfoForm, InfoView, Lightbox, checkInfo, emptyFields, infoOf } from "./LeadInfo";
+import { LeadChat, type LeadFacts } from "./LeadChat";
+import { LeadsMap } from "./LeadsMap";
 import { ChatHistory } from "./ChatHistory";
 import { Leaderboard, LevelLadder, useBoard } from "./Leaderboard";
 import type { Thread } from "@/lib/chats";
 import { reportStatus as status } from "./status";
 import { Btn, Empty, Icon, PhotoTile, ago } from "../ui";
+import { Choice, Input } from "@/components/form";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 export function ReporterApp({ launch, clearLaunch, onDemo, framed }: { launch: Preset | null; clearLaunch: () => void; onDemo: () => void; framed?: boolean }) {
   const { s, me, mutate } = useApp();
@@ -144,12 +151,28 @@ function Thumb({ r, size = 40 }: { r: Report; size?: number }) {
     : <span style={{ width: size, height: size }} className="grid shrink-0 place-items-center rounded-md bg-surface text-muted"><Icon n={r.input.subject === "site" ? "layers" : "camera"} s={Math.round(size * 0.45)} /></span>;
 }
 function leadInfo(r: Report) {
-  const live = r.items.filter((i) => !i.silent); const main = live.find((i) => i.status !== "closed") ?? live[0]; const steps = main ? stepsOf(main) : [];
+  const live = r.items.filter((i) => !i.silent); const main = live.find((i) => i.kind === "lead") ?? live.find((i) => i.status !== "closed") ?? live[0]; const steps = main ? stepsOf(main) : [];
   const step = r.status === "queued" ? "Waiting to send" : main?.status === "closed" ? (main.outcome ?? "Done") : main ? steps[main.step] : "Submitted";
   const units = r.input.units && r.input.units > 1 ? ` · ${r.input.units} lifts` : "";
   const where = (r.input.number ? `Lift ${r.input.number}` : r.input.subject === "site" ? "Building site" : r.input.subject === "notice" ? "Notice" : "Number not read") + units;
   const pts = r.points.filter((p) => p.status === "confirmed").reduce((x, p) => x + p.pts, 0);
   const stx = status(r); return { color: dotOf(stx), main, steps, track: r.status === "queued" ? "queued" : main?.track, tier: main?.tier as string | undefined, owner: main?.ownerId, total: Math.max(steps.length, 3), at: r.status === "queued" ? 0 : main?.step ?? 0, closed: main?.status === "closed", step, where, pts, st: status(r) };
+}
+
+/** Downloads the filtered leads as a CSV, which Excel opens directly. The BOM keeps Excel from garbling non-ASCII names. */
+function exportLeads(list: Report[]) {
+  const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+  const head = ["Lead No", "Building", "Address", "Area", "Opportunity", "Tier", "Status", "Current step", "Owner", "Points", "Created", "Last update"];
+  const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+  const rows = list.map((r) => {
+    const x = leadInfo(r);
+    return [r.id, r.placeName, PLACES.find((p) => p.id === r.placeId)?.addr ?? "", AREAS.find((a) => a.id === r.area)?.name ?? r.area, OPP[x.track ?? "info"]?.label ?? "Info", x.tier ?? "", x.st.t, x.step, userOf(x.owner)?.name ?? "", x.pts, day(r.createdAt), day(r.timeline[r.timeline.length - 1]?.t ?? r.createdAt)];
+  });
+  const csv = "﻿" + [head, ...rows].map((row) => row.map(cell).join(",")).join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  a.download = `Snap_Lead_leads_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-")}.csv`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 function ReportRow({ r, onOpen, active }: { r: Report; onOpen: () => void; active?: boolean }) {
@@ -174,8 +197,8 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
   const { s, me, now } = useApp();
   const [f, setF] = useState("all"); const [q, setQ] = useState(""); const [oppF, setOppF] = useState("all"); const [tierF, setTierF] = useState("all"); const [areaF, setAreaF] = useState("all"); const [page, setPage] = useState(1);
   const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: "updated", d: -1 });
-  const [vis, setVis] = useState({ opp: true, tier: true, status: true, progress: true, owner: true, updated: true }); const [panel, setPanel] = useState(false);
-  const [checked, setChecked] = useState<string[]>([]); const [view, setView] = useState<"list" | "grid">("list"); const [menu, setMenu] = useState<string | null>(null);
+  const [vis, setVis] = useState({ opp: true, tier: true, status: true, progress: true, owner: true, updated: true });
+  const [checked, setChecked] = useState<string[]>([]); const [view, setView] = useState<"list" | "grid" | "map">("list"); const [pin, setPin] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const [bw, setBw] = useState(0); const wide = bw >= 860; const narrow = bw > 0 && bw < 640;
   const [showF, setShowF] = useState(false);
@@ -212,13 +235,12 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
   const colLabel: Record<string, string> = { opp: "Opportunity", tier: "Tier", status: "Status", progress: "Progress", owner: "Owner", updated: "Updated" };
   const sortBy = (k: string) => setSort((p) => ({ k, d: p.k === k ? (p.d === 1 ? -1 : 1) : 1 }));
   const th = (k: string | undefined, children: React.ReactNode) => k ? <button onClick={() => sortBy(k)} className="inline-flex items-center gap-1 text-left t-label hover:text-ink">{children}<span className={sort.k === k ? "text-ink" : "opacity-50"}>⇅</span></button> : <span className="t-label">{children}</span>;
-  const sel2 = "min-h-10 rounded-md border border-line bg-white px-3 text-[13px] text-ink outline-none focus:border-brand";
   const filterSelects = (
     <>
-      <select aria-label="Status" value={f} onChange={(e) => { setF(e.target.value); setPage(1); }} className={sel2}><option value="all">Status</option><option value="progress">In progress</option><option value="needs">Needs you</option><option value="done">Done / won</option></select>
-      <select aria-label="Opportunity" value={oppF} onChange={(e) => { setOppF(e.target.value); setPage(1); }} className={sel2}><option value="all">Opportunity</option>{opps.map((o) => <option key={o} value={o}>{o}</option>)}</select>
-      <select aria-label="Tier" value={tierF} onChange={(e) => { setTierF(e.target.value); setPage(1); }} className={sel2}><option value="all">Tier</option><option value="Hot">Hot</option><option value="Warm">Warm</option><option value="Cold">Cold</option></select>
-      <select aria-label="My area" value={areaF} onChange={(e) => { setAreaF(e.target.value); setPage(1); }} className={sel2}><option value="all">My Area</option>{areas.map((x) => <option key={x} value={x}>{areaName(x)}</option>)}</select>
+      <Choice aria-label="Status" value={f} onChange={(v) => { setF(v); setPage(1); }} className="@xl:w-auto" options={[{ value: "all", label: "Status" }, { value: "progress", label: "In progress" }, { value: "needs", label: "Needs you" }, { value: "done", label: "Done / won" }]} />
+      <Choice aria-label="Opportunity" value={oppF} onChange={(v) => { setOppF(v); setPage(1); }} className="@xl:w-auto" options={[{ value: "all", label: "Opportunity" }, ...opps]} />
+      <Choice aria-label="Tier" value={tierF} onChange={(v) => { setTierF(v); setPage(1); }} className="@xl:w-auto" options={[{ value: "all", label: "Tier" }, "Hot", "Warm", "Cold"]} />
+      <Choice aria-label="My area" value={areaF} onChange={(v) => { setAreaF(v); setPage(1); }} className="@xl:w-auto" options={[{ value: "all", label: "My Area" }, ...areas.map((x) => ({ value: x, label: areaName(x) }))]} />
     </>
   );
   const filters = [f, oppF, tierF, areaF].filter((v) => v !== "all").length;
@@ -230,7 +252,7 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
         <div className="w-full p-4 @3xl:p-6">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3"><span className="hidden text-brand @xl:block"><Icon n="camera" s={30} w={1.6} /></span><h1 className="text-[24px] font-semibold leading-tight tracking-tight @xl:text-[28px]">My leads</h1></div>
-            <button onClick={onSnap} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md bg-brand px-4 text-[13.5px] font-semibold text-white hover:bg-brand-dark"><Icon n="plus" s={15} w={2.4} /> New lead</button>
+            <Button onClick={onSnap} className="h-10 gap-2 px-4 text-[13.5px] font-semibold"><Icon n="plus" s={15} w={2.4} /> New lead</Button>
           </div>
           <p className="t-small mt-1 @xl:ml-[42px]">Turn lift sightings into opportunities, service action and better records.</p>
           <StatRow>
@@ -241,27 +263,28 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
             <Stat2 icon="star" label="Points earned" value={totalPts} tone={T.gold} extra={todayPts > 0 ? <span className="whitespace-nowrap text-[12px] font-semibold" style={{ color: "var(--color-st-done)" }}>↑ +{todayPts} today</span> : undefined} />
           </StatRow>
           <div className="mt-4 flex items-center gap-2">
-            <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-white px-3 text-muted focus-within:border-brand"><Icon n="search" s={15} /><input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by building, lift number or lead ID…" className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-muted" /></label>
-            <button aria-label="Filters" aria-expanded={showF} onClick={() => setShowF(!showF)} className={`relative inline-flex h-10 shrink-0 items-center gap-2 rounded-md border bg-white px-3 text-[13px] font-medium ${showF ? "border-ink/40 bg-surface" : "border-line text-ink/80 hover:bg-surface"}`}><Icon n="sliders" s={16} /><span className="hidden @xl:inline">Filters</span>{filters > 0 && <span className="num grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1.5 text-[11px] font-semibold text-white">{filters}</span>}</button>
-            {wide && view === "list" && <div className="relative">
-              <button aria-label="Columns" onClick={() => setPanel(!panel)} className={`inline-flex h-10 items-center gap-1.5 rounded-md border bg-white px-3 text-[13px] font-medium ${panel ? "border-ink/40 bg-surface" : "border-line text-ink/80 hover:bg-surface"}`}>Columns</button>
-              {panel && <>
-                <button aria-label="Close" className="fixed inset-0 z-30" onClick={() => setPanel(false)} />
-                <div className="float pop absolute right-0 top-12 z-40 w-56 rounded-md border border-line bg-white p-3">
-                  <div className="t-label mb-2">Columns</div>
-                  <div className="space-y-1">{colKeys.map((k) => <label key={k} className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 text-[13.5px] hover:bg-surface"><input type="checkbox" checked={vis[k]} onChange={() => setVis({ ...vis, [k]: !vis[k] })} className="h-4 w-4 accent-[#d42a2a]" />{colLabel[k]}{vis[k] && !fit[k] && <span className="ml-auto text-[11px] text-muted">no room</span>}</label>)}</div>
-                  <button onClick={() => { setVis({ opp: true, tier: true, status: true, progress: true, owner: true, updated: true }); setPanel(false); }} className="mt-3 w-full rounded-md border border-line px-3 py-2 text-[13px] font-medium hover:bg-surface">Show all columns</button>
-                </div>
-              </>}
-            </div>}
-            <div className="hidden overflow-hidden rounded-md border border-line bg-white @xl:flex">
-              {([["list", "list"], ["grid", "layers"]] as const).map(([v, ic]) => <button key={v} aria-label={v} onClick={() => setView(v)} className={`grid h-10 w-11 place-items-center ${view === v ? "bg-brand-soft text-brand" : "text-ink/60 hover:bg-surface"}`} style={view === v ? { boxShadow: "inset 0 0 0 1.5px var(--color-brand)" } : undefined}><Icon n={ic} s={17} /></button>)}
+            <label className="relative min-w-0 flex-1"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"><Icon n="search" s={15} /></span><Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search by building, lift number or lead ID…" className="pl-9" /></label>
+            <Button variant="outline" aria-label="Filters" aria-expanded={showF} onClick={() => setShowF(!showF)} className="h-10 gap-2 px-3 text-[13px]"><Icon n="sliders" s={16} /><span className="hidden @xl:inline">Filters</span>{filters > 0 && <span className="num grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1.5 text-[11px] font-semibold text-white">{filters}</span>}</Button>
+            {wide && view === "list" && <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="outline" aria-label="Columns" className="h-10 px-3 text-[13px]" />}>Columns</DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Columns</DropdownMenuLabel>
+                  {colKeys.map((k) => <DropdownMenuCheckboxItem key={k} closeOnClick={false} checked={vis[k]} onCheckedChange={(v) => setVis({ ...vis, [k]: v })}>{colLabel[k]}{vis[k] && !fit[k] && <span className="ml-auto text-[11px] text-muted">no room</span>}</DropdownMenuCheckboxItem>)}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setVis({ opp: true, tier: true, status: true, progress: true, owner: true, updated: true })}>Show all columns</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>}
+            <Button variant="outline" aria-label="Export to Excel" title="Export the filtered leads to Excel" disabled={!list.length} onClick={() => exportLeads(list)} className="h-10 gap-2 px-3 text-[13px]"><Icon n="doc" s={16} /><span className="hidden @3xl:inline">Export</span></Button>
+            <div className="flex shrink-0 overflow-hidden rounded-md border border-line bg-white">
+              {([["list", "list", "List"], ["grid", "layers", "Cards"], ["map", "map", "Map"]] as const).map(([v, ic, l]) => <button key={v} aria-label={`${l} view`} title={`${l} view`} onClick={() => { setView(v); setPin(null); }} className={`h-10 w-10 place-items-center @xl:w-11 ${v === "grid" ? "hidden @xl:grid" : "grid"} ${view === v ? "bg-brand-soft text-brand" : "text-ink/60 hover:bg-surface"}`} style={view === v ? { boxShadow: "inset 0 0 0 1.5px var(--color-brand)" } : undefined}><Icon n={ic} s={17} /></button>)}
             </div>
           </div>
           {showF && (
             <div className="pop mt-2 grid grid-cols-2 gap-2 rounded-md border border-line bg-white p-2.5 @xl:flex @xl:flex-wrap @xl:items-center">
               {filterSelects}
-              {filters > 0 && <button onClick={() => { setF("all"); setOppF("all"); setTierF("all"); setAreaF("all"); setPage(1); }} className="col-span-2 min-h-10 rounded-md px-3 text-[13px] font-medium text-ink/70 hover:bg-surface hover:text-ink @xl:ml-auto">Clear filters</button>}
+              {filters > 0 && <Button variant="ghost" onClick={() => { setF("all"); setOppF("all"); setTierF("all"); setAreaF("all"); setPage(1); }} className="col-span-2 h-10 px-3 text-[13px] text-ink/70 @xl:ml-auto">Clear filters</Button>}
             </div>
           )}
           {!showF && filters > 0 && (
@@ -271,8 +294,19 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
               ))}
             </div>
           )}
-          {menu && <button aria-label="Close menu" className="fixed inset-0 z-30" onClick={() => setMenu(null)} />}
-          {list.length === 0 ? <div className="sheet mt-4 p-8 text-center text-sm text-muted">{mine.length ? "No leads match." : "Nothing yet. Snap a lift in Chat and your lead shows up here."}</div> : view === "grid" || !wide ? (
+          {list.length === 0 ? <div className="sheet mt-4 p-8 text-center text-sm text-muted">{mine.length ? "No leads match." : "Nothing yet. Snap a lift in Chat and your lead shows up here."}</div> : view === "map" ? (() => {
+            const pts = list.flatMap((r) => { const p = PLACES.find((z) => z.id === r.placeId); if (!p) return []; const x = leadInfo(r); return [{ id: r.id, lat: p.lat, lng: p.lng, color: x.color, title: r.placeName, sub: `${OPP[x.track ?? "info"]?.label ?? "Info"} · ${x.step}`, status: x.st.t }]; });
+            const missing = list.length - pts.length;
+            return (
+              <div className="sheet mt-4 p-2">
+                <LeadsMap leads={pts} focus={pin} onFocus={setPin} onOpen={(id) => setOpenId(id)} className="h-[22rem] @3xl:h-[30rem]" />
+                <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-1 pt-2.5 text-[12.5px] text-muted">
+                  <span>{pts.length} {pts.length === 1 ? "lead" : "leads"} on the map{missing > 0 ? ` · ${missing} ${missing === 1 ? "lead has" : "leads have"} no map location` : ""}</span>
+                  <span className="flex flex-wrap gap-3">{[["In progress", DOT.progress], ["Needs you", DOT.needs], ["Records update", "var(--color-st-records)"], ["Done / won", DOT.done]].map(([l, c]) => <span key={l} className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>)}</span>
+                </div>
+              </div>
+            );
+          })() : view === "grid" || !wide ? (
             view === "grid" ? (
               <div className="mt-4 grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-3">
                 {shown.map((r) => { const x = leadInfo(r); return (
@@ -299,14 +333,20 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
                   {fit.progress && <span className="min-w-0"><span className="mb-1.5 block truncate text-[13px]">{x.step}</span><Line total={x.total} at={x.at} closed={x.closed} color={x.color} /></span>}
                   {fit.owner && <span><OwnerDot id={x.owner} /></span>}
                   {fit.updated && <span className="text-right t-small">{ago(now - upd(r))}</span>}
-                  <span className="relative text-right">
-                    <button aria-label="More" onClick={(e) => { e.stopPropagation(); setMenu(menu === r.id ? null : r.id); }} className="px-1 text-[18px] leading-none text-muted hover:text-ink">⋯</button>
-                    {menu === r.id && <span className="float absolute right-0 top-7 z-40 w-48 overflow-hidden rounded-md border border-line bg-white text-left text-[13px]"><button onClick={(e) => { e.stopPropagation(); setMenu(null); setOpenId(r.id); }} className="block w-full px-3 py-2 text-left hover:bg-surface">Open lead</button><button onClick={(e) => { e.stopPropagation(); setMenu(null); void navigator.clipboard?.writeText(r.id); }} className="block w-full px-3 py-2 text-left hover:bg-surface">Copy lead ID</button></span>}
+                  <span className="relative text-right" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger aria-label="More" className="px-1 text-[18px] leading-none text-muted hover:text-ink">⋯</DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem onClick={() => setOpenId(r.id)}>Open lead</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setView("map"); setPin(r.id); }}>Show on map</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => void navigator.clipboard?.writeText(r.id)}>Copy lead ID</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </span>
                 </div>); })}
             </div>
           )}
-          {list.length > 0 && (
+          {list.length > 0 && view !== "map" && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted">
               <span>Showing {(cur - 1) * per + 1}–{Math.min(cur * per, list.length)} of {list.length} leads{checked.length > 0 && <span> · {checked.length} selected</span>}</span>
               {pages > 1 && (
@@ -323,7 +363,7 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
       {sel && narrow && <div className="absolute inset-0 z-20"><ReportDetail key={sel} id={sel} page onClose={() => setOpenId(null)} /></div>}
       {sel && !narrow && (
         <>
-          <button aria-label="Close" onClick={() => setOpenId(null)} className="fixed inset-0 z-40 bg-ink/35" />
+          <button aria-label="Close lead" onClick={(e) => { const x = e.currentTarget.parentElement?.querySelector<HTMLButtonElement>("[data-detail-close]"); if (x) x.click(); else setOpenId(null); }} className="fixed inset-0 z-40 bg-ink/35" />
           <aside className="pop float fixed bottom-0 right-0 top-[var(--safe-top,0px)] z-50 w-[max(29rem,75vw)] max-w-full border-l border-line bg-white pb-[var(--safe-bottom,0px)]"><ReportDetail key={sel} id={sel} onClose={() => setOpenId(null)} /></aside>
         </>
       )}
@@ -332,12 +372,21 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
 }
 
 function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; page?: boolean }) {
-  const { s, mutate, now } = useApp();
+  const { s, mutate, now, me } = useApp();
+  const tech = !!me?.title.startsWith("Field technician");
+  const [ask, setAsk] = useState(false);
   const r = s.reports.find((x) => x.id === id);
   const [num, setNum] = useState(""); const [form, setForm] = useState<"" | "contact" | "note">(""); const [txt, setTxt] = useState("");
-  const [tab, setTab] = useState<"overview" | "details" | "activity" | "photos">("overview"); const [note, setNote] = useState(""); const [more, setMore] = useState(false);
+  const [tab, setTab] = useState<"overview" | "details" | "activity" | "photos">("overview"); const [note, setNote] = useState("");
   const partRef = useRef<HTMLElement>(null);
+  const [edit, setEdit] = useState<LeadInfoT | null>(null); const [focusKey, setFocusKey] = useState<keyof LeadInfoT | undefined>(); const [leave, setLeave] = useState(false);
+  const [pAt, setPAt] = useState(0); const [lb, setLb] = useState<number | null>(null);
   if (!r) return <Empty text="Lead not found." />;
+  const info = infoOf(r); const dirty = !!edit && JSON.stringify(edit) !== JSON.stringify(info); const check = edit ? checkInfo(edit) : null;
+  const close = () => (dirty ? setLeave(true) : onClose());
+  const startEdit = (k?: keyof LeadInfoT) => { setEdit(infoOf(r)); setFocusKey(k); setTab("details"); };
+  const flash = (t: string) => { setNote(t); setTimeout(() => setNote(""), 1800); };
+  const save = () => { if (!edit || !check?.ok) return; mutate((z) => A.editInfo(z, r.id, edit)); setEdit(null); flash("Lead details saved"); };
   const x = leadInfo(r); const main = x.main; const steps = x.steps;
   const live = r.items.filter((i) => !i.silent);
   const needsInfo = r.items.some((i) => i.flags.includes("needsInfo"));
@@ -368,14 +417,20 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
   ).map((m) => ({ ...m, lost: !m.hit && x.closed && !won }));
   const open = ladder.filter((m) => !m.hit && !m.lost).reduce((a, m) => a + m.pts, 0);
   const equip = r.input.equip === "lift" ? "Lift" : r.input.equip === "escalator" ? "Escalator" : "Moving walk";
+  const i = r.input;
+  const read = i.subject !== "unit" ? `The photos show a ${i.subject === "site" ? "building site" : "notice"}, not a unit yet. ${r.photos.length} photo${r.photos.length === 1 ? "" : "s"} on file.`
+    : [`${equip}${i.units > 1 ? `, ${i.units} units` : ""}.`, i.brand === "ours" ? "Schindler brand." : i.brand === "other" ? "Another brand." : "Brand not readable.", i.number ? `Number ${i.number}.` : "Number not read.",
+      i.servicer === "us" ? "Serviced by Schindler." : i.servicer === "other" ? "Serviced by another company." : i.servicer === "maker" ? "Serviced by the maker." : "", i.age ? `About ${i.age} years old.` : "",
+      i.condition === "unsafe" ? "Reported unsafe." : i.condition === "out" ? "Out of service." : i.condition === "minor" ? "Minor faults reported." : ""].filter(Boolean).join(" ");
+  const facts: LeadFacts = { where: story, next, closed: x.closed, owner: owner ? { name: owner.name, role: owner.title } : undefined, teams: teamTold, canAdd, pending: sum("pending"), confirmed: sum("confirmed"), read, empty: emptyFields(info) };
   return (
     <div className="@container relative flex h-full bg-white">
     <div className="flex min-w-0 flex-1 flex-col">
       <div className={`shrink-0 border-b border-line ${page ? "px-4 pt-3" : "px-5 pt-5 @4xl:px-6"}`}>
-        {page && <button onClick={onClose} className="-ml-1.5 mb-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium text-ink/70 hover:bg-surface hover:text-ink"><Icon n="back" s={15} /> My leads</button>}
+        {page && <Button variant="ghost" size="sm" onClick={close} className="-ml-1.5 mb-2 gap-1 px-1.5 text-[13px] text-ink/70"><Icon n="back" s={15} /> My leads</Button>}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0"><h2 className="truncate text-[20px] font-semibold leading-tight tracking-tight">{r.placeName}</h2><div className="t-small mt-1.5 flex items-center gap-1.5"><Icon n="pin" s={13} />{r.id} · {x.where}</div></div>
-          <div className="flex shrink-0 items-center gap-3"><StateChip r={r} />{!page && <button aria-label="Close" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={16} /></button>}</div>
+          <div className="flex shrink-0 items-center gap-3">{tech && <Button variant="outline" onClick={() => setAsk(true)} className="h-9 gap-1.5 px-2.5 text-[13px] @3xl:hidden"><span className="text-brand"><Icon n="sparkle" s={15} /></span>Ask AI</Button>}<StateChip r={r} />{!page && <Button variant="outline" size="icon-lg" data-detail-close aria-label="Close" onClick={close}><Icon n="x" s={16} /></Button>}</div>
         </div>
         <nav className={`scroll-hide mt-4 flex overflow-x-auto ${page ? "gap-5" : "gap-6"}`}>{tabs.map(([k, l]) => <button key={k} onClick={() => setTab(k)} className={`relative shrink-0 pb-3 text-[13.5px] transition ${tab === k ? "font-semibold text-brand" : "text-muted hover:text-ink"}`}>{l}{tab === k && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-brand" />}</button>)}</nav>
       </div>
@@ -384,7 +439,7 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
           <div className="sheet p-4" style={{ borderLeft: "3px solid var(--color-st-attention)" }}>
             <div className="text-sm font-semibold">We need one thing from you</div>
             <p className="mt-1 text-sm text-muted">{retake ? "A clearer photo of the plate or button panel would let us continue." : "I could not read the servicing firm. Can you add it? Check the sticker from a public area."}</p>
-            <div className="mt-3 flex gap-2">{retake ? <Btn sm onClick={() => mutate((z) => A.resumeRetake(z, r.id))}><Icon n="camera" s={14} /> Send a clearer photo</Btn> : <><input value={num} onChange={(e) => setNum(e.target.value)} placeholder="e.g. OtherLift" className="min-h-9 min-w-0 flex-1 rounded-lg border border-line bg-white px-3 text-sm" /><Btn sm disabled={!num} onClick={() => { mutate((z) => A.extra(z, r.id, "detail", num)); setNum(""); }}>Add</Btn></>}</div>
+            <div className="mt-3 flex gap-2">{retake ? <Btn sm onClick={() => mutate((z) => A.resumeRetake(z, r.id))}><Icon n="camera" s={14} /> Send a clearer photo</Btn> : <><Input value={num} onChange={(e) => setNum(e.target.value)} placeholder="e.g. OtherLift" className="h-9 min-w-0 flex-1" /><Btn sm disabled={!num} onClick={() => { mutate((z) => A.extra(z, r.id, "detail", num)); setNum(""); }}>Add</Btn></>}</div>
           </div>
         )}
 
@@ -414,12 +469,12 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
                   <div className="mt-2 divide-y divide-line">
                     {([["contact", "user", "Site contact", "Who manages the building or the lifts", r.extras.contact, 5], ["note", "edit", "Note for the owner", "Anything you noticed on site", r.extras.note, 5]] as const).map(([k, ic, l, d, done, pts]) => (
                       <div key={k} className="py-2.5">
-                        <button disabled={!!done} onClick={() => { setForm(form === k ? "" : k); setTxt(""); }} className="flex w-full items-center gap-3 text-left disabled:cursor-default">
+                        <button disabled={!!done} onClick={() => { if (k === "contact") return startEdit("contactName"); setForm(form === k ? "" : k); setTxt(""); }} className="flex w-full items-center gap-3 text-left disabled:cursor-default">
                           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-surface text-ink/70"><Icon n={ic} s={15} /></span>
                           <span className="min-w-0 flex-1"><span className="block text-[13.5px] font-medium">{l}</span><span className="block truncate t-small">{done ? done : d}</span></span>
                           {done ? <span className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: "var(--color-st-done)" }}><Icon n="check" s={13} w={2.6} />+{pts}</span> : <span className="rounded-md border border-line px-2 py-1 text-[12px] font-semibold">+{pts}</span>}
                         </button>
-                        {form === k && <div className="pop mt-2.5 flex gap-2"><input autoFocus value={txt} onChange={(e) => setTxt(e.target.value)} placeholder={k === "contact" ? "Name and role, e.g. Facility manager" : "What should the owner know?"} className="min-h-10 min-w-0 flex-1 rounded-md border border-line px-3 text-sm outline-none focus:border-brand" /><Btn sm disabled={!txt} onClick={() => { mutate((z) => A.extra(z, r.id, k, txt)); setForm(""); setTxt(""); }}>Add</Btn></div>}
+                        {form === k && <div className="pop mt-2.5 flex gap-2"><Input autoFocus value={txt} onChange={(e) => setTxt(e.target.value)} placeholder={k === "contact" ? "Name and role, e.g. Facility manager" : "What should the owner know?"} className="min-w-0 flex-1" /><Btn sm disabled={!txt} onClick={() => { mutate((z) => A.extra(z, r.id, k, txt)); setForm(""); setTxt(""); }}>Add</Btn></div>}
                       </div>
                     ))}
                     <div className="py-2.5">
@@ -455,7 +510,7 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
                 <div className="flex items-center gap-2"><span style={{ color: "#d9a300" }}><Icon n="sparkle" s={15} /></span><h3 className="text-[15px] font-semibold">What the AI saw</h3></div>
                 <p className="mt-2 text-[13.5px] leading-relaxed">{r.plain.length ? r.plain.join(" ") : r.headline}</p>
                 <div className="mt-3 flex flex-wrap gap-1.5"><OppTag track={x.track} /><TierTag tier={x.tier} /><span className="inline-flex items-center rounded-md bg-surface px-2.5 py-1 text-[12px] font-semibold text-ink/70">{equip}{r.input.units && r.input.units > 1 ? ` × ${r.input.units}` : ""}</span></div>
-                {r.photos.length > 0 && <div className="mt-3 grid grid-cols-4 gap-1.5">{r.photos.slice(0, 4).map((p) => <PhotoTile key={p.id} p={p} className="!rounded-md" />)}</div>}
+                {r.photos.length > 0 && <div className="mt-3 grid grid-cols-4 gap-1.5">{r.photos.slice(0, 4).map((p, k) => <button key={p.id} aria-label={`Open ${p.label}`} onClick={() => setLb(k)} className="rounded-md"><PhotoTile p={p} className="!rounded-md" /></button>)}</div>}
               </section>
 
               <section className="sheet overflow-hidden">
@@ -475,12 +530,13 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
           </div>
         )}
 
-        {tab === "details" && (<>
+        {tab === "details" && (<div className="space-y-4">
+          {edit ? <InfoForm value={edit} onChange={setEdit} focus={focusKey} /> : <InfoView info={info} canEdit={r.status === "sent"} onEdit={() => startEdit()} />}
           <div className="sheet divide-y divide-line">
-            {[["Place", r.placeName], ["Area", r.area], ["Equipment", r.input.equip === "lift" ? "Lift" : r.input.equip === "escalator" ? "Escalator" : "Moving walk"], ["Unit number", r.input.number ?? "Not read"], ["Sent to", teamTold.join(", ") || "Not routed yet"]].map(([k, v]) => <div key={k} className="flex items-center justify-between gap-3 px-4 py-3 text-[13.5px]"><span className="text-muted">{k}</span><span className="text-right font-medium">{v}</span></div>)}
+            {[["Place", r.placeName], ["Sent to", teamTold.join(", ") || "Not routed yet"]].map(([k, v]) => <div key={k} className="flex items-center justify-between gap-3 px-4 py-3 text-[13.5px]"><span className="text-muted">{k}</span><span className="text-right font-medium">{v}</span></div>)}
           </div>
           {r.answers.length > 0 && <div className="sheet p-4"><div className="t-label mb-1">Your answers</div><dl className="divide-y divide-line">{r.answers.map((z, k) => <div key={k} className="flex items-start justify-between gap-3 py-2.5 text-[13.5px]"><dt className="capitalize text-muted">{z.q}</dt><dd className="text-right font-medium">{z.a}</dd></div>)}</dl></div>}
-        </>)}
+        </div>)}
 
         {tab === "activity" && (
           <div className="sheet p-5">
@@ -488,20 +544,49 @@ function ReportDetail({ id, onClose, page }: { id: string; onClose: () => void; 
           </div>
         )}
 
-        {tab === "photos" && (
-          r.photos.length ? <div className="grid grid-cols-2 gap-3 @xl:grid-cols-3">{r.photos.map((p) => <PhotoTile key={p.id} p={p} className="!rounded-lg" />)}</div> : <div className="sheet p-8 text-center text-sm text-muted">No photos.</div>
-        )}
+        {tab === "photos" && <Gallery photos={r.photos} at={pAt} setAt={setPAt} onOpen={setLb} />}
       </div></div>
       <div className={`relative shrink-0 border-t border-line bg-white ${page ? "px-4 py-3" : "px-5 py-4"}`}>
         {note && <div className="pop absolute -top-9 left-5 rounded-md bg-ink px-3 py-1.5 text-[12px] text-white">{note}</div>}
-        {more && <><button aria-label="Close" className="fixed inset-0 z-10" onClick={() => setMore(false)} /><div className="float absolute bottom-16 right-5 z-20 w-48 overflow-hidden rounded-md border border-line bg-white text-[13px]"><button onClick={() => { void navigator.clipboard?.writeText(r.id); setMore(false); setNote("Lead ID copied"); setTimeout(() => setNote(""), 1800); }} className="block w-full px-3 py-2 text-left hover:bg-surface">Copy lead ID</button><button onClick={() => { setMore(false); setTab("activity"); }} className="block w-full px-3 py-2 text-left hover:bg-surface">View activity</button></div></>}
+        {edit ? (
+          <div>
+            {check && !check.ok && <p className="mb-2 text-[12.5px] text-brand">{check.missing.length ? `Please fill required: ${check.missing.join(", ")}` : "Fix the highlighted fields to save."}</p>}
+            <div className="flex items-center gap-2.5">
+              <Button variant="outline" onClick={() => setEdit(null)} className="h-11 flex-1 px-3 text-[13.5px]">Cancel</Button>
+              <Button disabled={!check?.ok || !dirty} onClick={save} className="h-11 flex-1 gap-2 px-3 text-[13.5px] font-semibold"><Icon n="check" s={15} w={2.4} /> Save changes</Button>
+            </div>
+          </div>
+        ) : (
         <div className="flex items-center gap-2.5">
-          <button onClick={() => { setNote("NewCRM is simulated in this demo"); setTimeout(() => setNote(""), 2200); }} className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-[13.5px] font-medium hover:bg-surface"><span className="whitespace-nowrap"><span className="hidden @md:inline">Open in </span>NewCRM</span> <Icon n="link" s={15} /></button>
-          <button disabled={!canAdd || x.closed} onClick={() => { setTab("overview"); setTimeout(() => partRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); }} className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-[13.5px] font-medium hover:bg-surface disabled:opacity-40"><Icon n="edit" s={16} /> <span className="whitespace-nowrap">Add update</span></button>
-          <button aria-label="More" onClick={() => setMore(!more)} className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-line bg-white text-[18px] hover:bg-surface">⋯</button>
+          {tech && <Button variant="outline" onClick={() => flash("NewCRM is simulated in this demo")} className="h-11 flex-1 gap-2 px-3 text-[13.5px]"><span className="whitespace-nowrap"><span className="hidden @md:inline">Open in </span>NewCRM</span> <Icon n="link" s={15} /></Button>}
+          <Button variant="outline" disabled={!canAdd || x.closed} onClick={() => { setTab("overview"); setTimeout(() => partRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); }} className="h-11 flex-1 gap-2 px-3 text-[13.5px]"><Icon n="edit" s={16} /> <span className="whitespace-nowrap">Add update</span></Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" aria-label="More" className="size-11 text-[18px]" />}>⋯</DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="w-48">
+              <DropdownMenuItem disabled={r.status !== "sent"} onClick={() => startEdit()}>Edit details</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { void navigator.clipboard?.writeText(r.id); setNote("Lead ID copied"); setTimeout(() => setNote(""), 1800); }}>Copy lead ID</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTab("activity")}>View activity</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+        )}
       </div>
     </div>
+      {tech && <aside aria-label="Ask AI about this lead" className="hidden w-[22rem] shrink-0 border-l border-line @3xl:flex @3xl:flex-col @6xl:w-[26rem]"><LeadChat key={r.id} r={r} facts={facts} /></aside>}
+      {tech && ask && <div className="pop absolute inset-0 z-40 @3xl:hidden"><LeadChat key={r.id} r={r} facts={facts} onClose={() => setAsk(false)} /></div>}
+      {lb !== null && r.photos.length > 0 && <Lightbox photos={r.photos} at={lb} setAt={setLb} onClose={() => setLb(null)} />}
+      <AlertDialog open={leave} onOpenChange={setLeave}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave this lead?</AlertDialogTitle>
+            <AlertDialogDescription>You&apos;ve made changes to this lead that haven&apos;t been saved. If you leave now, they&apos;ll be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => { setLeave(false); setEdit(null); onClose(); }}>Leave</Button>
+            <AlertDialogCancel variant="default" autoFocus>Stay</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -521,7 +606,7 @@ function Rewards() {
   ];
   const earn: [string, string][] = [["Lead sent", "+10"], ["Missing lift added to records", "+30"], ["Accepted by the owner", "+20"], ["Quote sent", "+50"], ["Won", "+200"], ["Valid safety report", "+30"], ["Contact · note · extra photo", "+5 · +5 · +3"], ["Duplicate of a reported lift", "+2"]];
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 @3xl:p-6">
+    <div className="w-full p-4 @3xl:p-6">
       <h1 className="text-[24px] font-semibold tracking-tight @xl:text-[28px]">Rewards</h1>
       <div className="mt-4 grid grid-cols-[minmax(0,1fr)] items-start gap-4 @4xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] @4xl:grid-rows-[auto_1fr]">
           <section className="sheet min-w-0 p-4 @4xl:col-start-2 @4xl:row-start-1">

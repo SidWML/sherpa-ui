@@ -12,6 +12,8 @@ import { Bot, Btn, Card, Icon, Pill } from "../ui";
 import { DiscountGauge, OfferPill, RegionCard } from "./Offers";
 import { statusLine } from "./Opps";
 import { DashCard } from "../hub/parts";
+import { Choice, Input, Textarea } from "@/components/form";
+import { WinWhy } from "../Why";
 
 interface Chip { label: string; run: () => void; tone?: "green" | "red" | "soft"; icon?: string; quiet?: boolean }
 interface Ctx { assetId?: string; accountId?: string; offerId?: string; tenderId?: string; product?: ProductKey; reportId?: string; itemId?: string; nbaKey?: string; term?: number }
@@ -164,7 +166,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
       SH.makeOffer(st, { id, accountId, assetId: c.assetId, area, product, term, discountPct: disc, by: a.me!.id, fromNba: c.nbaKey, source: r && c.itemId ? { reportId: r.id, itemId: c.itemId } : undefined });
     });
     c.offerId = id; void rep;
-    const need = approversFor(disc);
+    const need = approversFor(disc, s.cfg);
     void bot([say(`Here is the draft. Drag the discount to try other terms: I check the guideline as you go.`, [`${disc}% off ${aboveLimit(disc) ? `is above the ${GUIDE.manager}% a manager can approve, so it cannot be sent for approval here` : need.length ? `is above the ${GUIDE.seller}% limit, so ${need.map((u) => NAMES[u]).join(" and ")} must approve` : `is within the ${GUIDE.seller}% limit, so no approval is needed`}.`, "Price = list price × area level × term, minus the discount."]), { k: "offer", id }], offerChips());
   }
   function offerChips(): Chip[] {
@@ -180,7 +182,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
     const o = current(); if (!o) return void bot(["There is no offer yet. Tell me what to draft."], starters());
     if (o.status === "draft" || o.status === "changes") {
       if (aboveLimit(o.discountPct)) return void bot([say(`${o.discountPct}% is more than a manager can approve (${GUIDE.manager}%). Lower the discount, or get the regional lead's written approval outside this app.`)], [{ label: "Compare 3 options", run: () => void compare() }]);
-      const need = approversFor(o.discountPct);
+      const need = approversFor(o.discountPct, s.cfg);
       app.current.mutate((st) => SH.submit(st, o.id, me_().id));
       if (need.length) return void bot([say(`Sent for approval to ${need.map((u) => NAMES[u]).join(" and then ")}. ${o.discountPct}% is above the ${GUIDE.seller}% guideline. I will tell you here and in your Today feed when there is a decision.`, ["Guideline: up to 10% you send alone; up to 20% manager; above 20% the regional lead too."])], [
         { label: "Where do my approvals stand?", run: () => ops.ask("Where do my approvals stand?") }, { label: "Open the offer", run: () => onOpenOffer(o.id) }, { label: "Back to my day", run: () => ops.ask("What needs my action?") }]);
@@ -289,6 +291,7 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
     const lc = t.toLowerCase();
     Object.assign(ctx.current, entity(t));
     const c = ctx.current;
+    if (/\bsnap\b|spotted|saw a (lift|building)|report (a|this) lift|new lead from (a )?photo|building site/.test(lc)) return void bot(["Snap & Lead takes it from here. Add a few photos and I will read the details, ask two or three quick questions and route it to the right team. You stay on this page."], [{ label: "Snap a lead", icon: "camera", tone: "green", run: () => go("snap") }, ...starters().slice(0, 2)]);
     if (/open the approval brief|open (the )?offer/.test(lc) && c.offerId) return onOpenOffer(c.offerId);
     if (/remind the approver/.test(lc) && c.offerId) { app.current.mutate((st) => SH.remind(st, c.offerId!, me_().id)); return void bot([say("Reminded. The approver has a message with the context.")], [{ label: "Back to my day", run: () => ops.ask("What needs my action?") }]); }
     const di = docIntent(lc); if (di) return runDoc(di.no, di.ref);
@@ -358,14 +361,15 @@ export function Sherpa({ seed, onOpenOffer, onOpenOpp, onOpenLead, noDash, go }:
 
   return (
     <div className="absolute inset-0 flex flex-col bg-surface">
-      <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="mx-auto w-full max-w-3xl space-y-3.5 px-3 py-5 @3xl:px-4">
+      <div ref={box} className="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden"><div className="w-full space-y-3.5 px-3 py-5 @3xl:px-4">
         {msgs.map((m) => <Bubble key={m.mid} m={m} ops={ops} />)}
         {typing && <Thinking />}
         {chips.length > 0 && !busy && <div className="pop flex flex-wrap gap-2 pt-1">{chips.map((c, k) => <button key={k} onClick={() => onChip(c)} className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3.5 py-2 text-[13px] font-medium transition ${c.tone === "green" ? "border-brand bg-brand text-white hover:bg-brand-dark" : "border-line bg-white hover:bg-surface"}`}>{c.icon && <Icon n={c.icon} s={14} />}{c.label}</button>)}</div>}
       </div></div>
-      <div className="shrink-0 bg-surface"><div className="mx-auto w-full max-w-3xl px-3 pb-2 pt-2.5">
+      <div className="shrink-0 bg-surface"><div className="w-full px-3 pb-2 pt-2.5">
         <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex items-center gap-1 rounded-lg border border-brand/60 bg-white p-1.5 focus-within:border-brand">
-          <input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "SHERPA is working…" : "Ask anything…"} className="min-h-10 min-w-0 flex-1 bg-transparent px-2.5 text-[14px] outline-none placeholder:text-muted disabled:opacity-60" />
+          <button type="button" aria-label="Snap a lead" title="Spotted a lift? Snap it as a lead" onClick={() => go("snap")} className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-ink/60 hover:bg-surface hover:text-ink"><Icon n="camera" s={18} /></button>
+          <Input value={text} onChange={(e) => setText(e.target.value)} disabled={busy} placeholder={busy ? "SHERPA is working…" : "Ask anything…"} className="min-w-0 flex-1 border-0 bg-transparent px-2.5 text-[14px] shadow-none focus-visible:ring-0 disabled:bg-transparent disabled:opacity-60 md:text-[14px]" />
           <button type="submit" aria-label="Send" disabled={busy || !text.trim()} className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-brand text-white disabled:opacity-35"><Icon n="send" s={17} /></button>
         </form>
         <div className="mt-1.5 hidden text-center text-[11.5px] text-muted @xl:block">SHERPA · Simulated agents, mock NewCRM data · Nothing is sent without your confirmation</div>
@@ -394,7 +398,7 @@ function CardView({ m, ops }: { m: Msg; ops: Ops }) {
   if (m.k === "doc") return <DocCard doc={m.doc} />;
   if (m.k === "dash") return <DashCard onOpen={ops.opp} onDo={ops.card} go={ops.go} />;
   if (m.k === "mytasks") {
-    const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).sort((a, b) => a.due - b.due);
+    const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).sort((a, b) => b.createdAt - a.createdAt);
     return <Card className="divide-y divide-line">{mine.length === 0 && <div className="p-4 text-sm text-muted">Nothing is waiting on you.</div>}{mine.slice(0, 8).map((t) => { const o = oppOf(s, t.oppId); return <button key={t.id} onClick={() => o && ops.opp(o.id)} className="flex w-full items-center gap-3 p-3 text-left hover:bg-surface"><div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{t.title}</div><div className="text-xs text-muted">{o ? o.id + " · " + o.title : "Task"} · from {NAMES[t.by]} · {t.due < now ? "overdue" : "due in " + Math.max(0, Math.round((t.due - now) / DAY)) + " days"}</div></div><Icon n="chev" s={14} /></button>; })}</Card>;
   }
   if (m.k === "oppstatus") {
@@ -449,7 +453,7 @@ function OfferCard({ id }: { id: string }) {
       <div className="mt-3 flex items-end justify-between gap-3"><div><div className="num text-2xl font-semibold tracking-tight">{chf(o.price)}</div><div className="text-xs text-muted">{PRODUCT[o.product].yearly ? `${chf(o.price / o.term)} per year × ${o.term}` : "one-off"}{o.discountPct ? ` · list ${chf(o.listPrice)}` : ""}</div></div></div>
       <div className="mt-3"><DiscountGauge pct={o.discountPct} /></div>
       {editable && <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-surface p-3">
-        {PRODUCT[o.product].yearly && <select value={o.term} onChange={(e) => mutate((st) => SH.setTerms(st, o.id, me!.id, { term: Number(e.target.value) }))} className="min-h-9 rounded-lg border border-line bg-white px-2 text-[13px]">{[1, 3, 5].map((t) => <option key={t} value={t}>{t} year{t > 1 ? "s" : ""}</option>)}</select>}
+        {PRODUCT[o.product].yearly && <Choice size="sm" value={String(o.term)} onChange={(v) => mutate((st) => SH.setTerms(st, o.id, me!.id, { term: Number(v) }))} options={[1, 3, 5].map((t) => ({ value: String(t), label: `${t} year${t > 1 ? "s" : ""}` }))} className="w-auto" aria-label="Term" />}
         <label className="flex min-w-40 flex-1 items-center gap-2 text-xs text-muted">Discount<input type="range" min={0} max={30} value={o.discountPct} onChange={(e) => mutate((st) => SH.setTerms(st, o.id, me!.id, { discountPct: Number(e.target.value) }))} className="flex-1 accent-[#e3001b]" /></label>
       </div>}
     </Card>
@@ -464,7 +468,7 @@ function CompareCard({ id, ops }: { id: string; ops: Ops }) {
     const total = Math.round(listPrice(o.area, o.product, v.term) * (1 - v.disc / 100));
     const unit = PRODUCT[o.product].yearly ? total / v.term : total;
     const win = winChance(s, o.area, o.product, v.disc);
-    return { ...v, total, unit, win, score: win * total, need: approversFor(v.disc), diff: ref.avg ? Math.round(((unit - ref.avg) / ref.avg) * 100) : 0 };
+    return { ...v, total, unit, win, score: win * total, need: approversFor(v.disc, s.cfg), diff: ref.avg ? Math.round(((unit - ref.avg) / ref.avg) * 100) : 0 };
   });
   const best = rows.reduce((a, b) => (b.score > a.score ? b : a));
   const editable = ["draft", "changes"].includes(o.status) && o.createdBy === me!.id;
@@ -476,7 +480,7 @@ function CompareCard({ id, ops }: { id: string; ops: Ops }) {
           <div className="mt-0.5 text-xs text-muted">{v.label}</div>
           <div className="num mt-2 text-xl font-semibold">{chf(v.total)}</div>
           <div className="text-[11.5px] text-muted">{PRODUCT[o.product].yearly ? `${chf(v.unit)} per year` : "one-off"} · {Math.abs(v.diff)}% {v.diff <= 0 ? "below" : "above"} area average</div>
-          <div className="mt-2 space-y-1 text-[12.5px]"><div className="flex justify-between"><span className="text-muted">Win chance</span><b className="num">{v.win}%</b></div><div className="flex justify-between"><span className="text-muted">Approval</span><b>{aboveLimit(v.disc) ? "Not possible here" : v.need.length === 0 ? "None" : "Manager"}</b></div></div>
+          <div className="mt-2 space-y-1 text-[12.5px]"><div className="flex justify-between"><WinWhy area={o.area} product={o.product} pct={v.disc}><span className="text-muted">Win chance</span></WinWhy><b className="num">{v.win}%</b></div><div className="flex justify-between"><span className="text-muted">Approval</span><b>{aboveLimit(v.disc) ? "Not possible here" : v.need.length === 0 ? "None" : "Manager"}</b></div></div>
           <Btn sm full v={v.key === best.key ? "primary" : "ghost"} className="mt-3" disabled={!editable || (o.term === v.term && o.discountPct === v.disc)} onClick={() => ops.pick(o.id, { term: v.term, disc: v.disc })}>{o.term === v.term && o.discountPct === v.disc ? "In use" : `Use ${v.key}`}</Btn>
         </div>))}
       </div>
@@ -495,8 +499,8 @@ function EmailCard({ id, chase, ops }: { id: string; chase?: boolean; ops: Ops }
   return (
     <Card className="p-4">
       <div className="mb-2 t-label">Email to {acc?.contact.name} · {acc?.contact.email}</div>
-      <input value={mail.subject} onChange={(e) => setMail({ ...mail, subject: e.target.value })} disabled={sent} className="mb-2 min-h-10 w-full rounded-lg border border-line px-3 text-sm font-medium" />
-      <textarea value={mail.body} onChange={(e) => setMail({ ...mail, body: e.target.value })} disabled={sent} className="min-h-48 w-full rounded-lg border border-line p-3 text-sm leading-relaxed" />
+      <Input value={mail.subject} onChange={(e) => setMail({ ...mail, subject: e.target.value })} disabled={sent} aria-label="Subject" className="mb-2 font-medium" />
+      <Textarea value={mail.body} onChange={(e) => setMail({ ...mail, body: e.target.value })} disabled={sent} aria-label="Message" className="min-h-48 leading-relaxed" />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Btn disabled={sent || !ready} onClick={() => { setSent(true); ops.send(o.id, mail, !!chase); }}><Icon n="send" s={15} /> {sent ? "Sent" : chase ? "Send follow-up" : "Send to customer"}</Btn>
         {!ready && !sent && <span className="text-xs text-amber-800">{o.status === "awaiting" ? "Waiting for approval first." : "Needs approval or a ready offer first."}</span>}

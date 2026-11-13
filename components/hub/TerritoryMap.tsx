@@ -6,7 +6,9 @@ import { AREA_NAME, OP, NAMES, addTask } from "@/lib/sherpa";
 import { USERS } from "@/lib/data";
 import { Icon } from "../ui";
 import { involvedOpps } from "./parts";
-import { T } from "../shared";
+import { FilterBar, FilterField, T } from "../shared";
+import { Choice } from "@/components/form";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 
 /* ------------------------------------------------------------------ web-mercator maths (no map library needed) */
 const TS = 256;
@@ -143,13 +145,18 @@ export function TerritoryMap({ onOpenOpp, onAsk, onGoWork }: { onOpenOpp: (id: s
     <div className="@container absolute inset-0 flex flex-col bg-surface">
       {/* filters */}
       <div className="shrink-0 border-b border-line bg-white px-3 py-2.5 @3xl:px-5">
-        <div className="scroll-hide flex items-center gap-2 overflow-x-auto @3xl:flex-wrap @3xl:overflow-visible">
-          {LAYERS.map(chip)}
-          <span className="mx-1 hidden h-6 w-px bg-line @3xl:block" />
-          <label className="flex min-h-9 min-w-[11rem] flex-1 items-center gap-2 rounded-md border border-line bg-white px-3 text-muted focus-within:border-brand @3xl:max-w-[18rem]"><Icon n="search" s={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a place or client…" className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-muted" /></label>
-          <select aria-label="Area" value={area} onChange={(e) => pickArea(e.target.value)} className="min-h-9 shrink-0 rounded-md border border-line bg-white px-2.5 text-[13px] outline-none focus:border-brand"><option value="all">All areas</option>{Object.entries(AREA_NAME).filter(([k]) => all.some((p) => p.area === k)).map(([k, v]) => <option key={k} value={k}>{v[0].toUpperCase() + v.slice(1)}</option>)}</select>
-          {toggle("My patch", mineOnly, setMineOnly)}
-          {toggle("Key accounts", keyOnly, setKeyOnly)}
+        <div className="flex flex-wrap items-center gap-2">
+          <InputGroup className="h-10 min-w-[11rem] flex-1 bg-white @3xl:max-w-[18rem]"><InputGroupAddon><Icon n="search" s={14} /></InputGroupAddon><InputGroupInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a place or client…" aria-label="Search" /></InputGroup>
+          <FilterBar onReset={() => { setOn({ lead: true, ours: true, other: true }); setMineOnly(false); setKeyOnly(false); pickArea("all"); }} active={[
+            ...LAYERS.filter((l) => !on[l]).map((l) => ({ label: "Hidden", value: LAYER_LABEL[l], clear: () => setOn({ ...on, [l]: true }) })),
+            ...(area !== "all" ? [{ label: "Area", value: AREA_NAME[area] ?? area, clear: () => pickArea("all") }] : []),
+            ...(mineOnly ? [{ label: "Show", value: "My patch", clear: () => setMineOnly(false) }] : []),
+            ...(keyOnly ? [{ label: "Show", value: "Key accounts", clear: () => setKeyOnly(false) }] : []),
+          ]}>
+            <div><span className="t-label mb-1 block">Layers</span><div className="flex flex-wrap gap-1.5">{LAYERS.map(chip)}</div></div>
+            <FilterField label="Area"><Choice value={area} onChange={pickArea} options={[{ value: "all", label: "All areas" }, ...Object.entries(AREA_NAME).filter(([k]) => all.some((p) => p.area === k)).map(([k, v]) => ({ value: k, label: v[0].toUpperCase() + v.slice(1) }))]} aria-label="Area" /></FilterField>
+            <div><span className="t-label mb-1 block">Show only</span><div className="flex flex-wrap gap-1.5">{toggle("My patch", mineOnly, setMineOnly)}{toggle("Key accounts", keyOnly, setKeyOnly)}</div></div>
+          </FilterBar>
         </div>
       </div>
 

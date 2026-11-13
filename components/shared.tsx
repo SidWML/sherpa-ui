@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { useApp, userOf } from "@/lib/store";
 import { Btn, Empty, Icon, ago } from "./ui";
 
@@ -48,9 +49,9 @@ export function Stat2({ icon, label, value, tone, active, onClick, chevron, extr
 
 export function Alerts({ onOpen }: { onOpen?: (reportId: string) => void }) {
   const { s, me, mutate, now } = useApp();
-  const list = s.alerts.filter((a) => a.userId === me!.id);
+  const list = s.alerts.filter((a) => a.userId === me!.id).sort((a, b) => b.t - a.t);
   return (
-    <div className="mx-auto max-w-2xl p-4 @3xl:p-6">
+    <div className="p-4 @3xl:p-6">
       <div className="flex items-center justify-between"><h1 className="text-2xl font-bold">Alerts</h1><Btn sm v="ghost" onClick={() => mutate((st) => { st.alerts.forEach((a) => { if (a.userId === me!.id) a.read = true; }); })}>Mark all read</Btn></div>
       <div className="mt-3 space-y-2">{list.length === 0 && <Empty text="No alerts yet." />}
         {list.map((a) => (
@@ -60,4 +61,48 @@ export function Alerts({ onOpen }: { onOpen?: (reportId: string) => void }) {
         ))}</div>
     </div>
   );
+}
+
+export function Drawer({ title, label, onClose, children, footer, wide, top }: { title: React.ReactNode; label?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean; top?: boolean }) {
+  return (
+    <>
+      <button aria-label="Close" onClick={onClose} className={`fixed inset-0 bg-ink/35 ${top ? "z-[60]" : "z-40"}`} />
+      <aside role="dialog" aria-label={typeof title === "string" ? title : label} className={`@container pop float fixed bottom-0 right-0 top-[var(--safe-top,0px)] flex w-full flex-col border-l border-line bg-white pb-[var(--safe-bottom,0px)] ${wide ? "max-w-[56rem]" : "max-w-[44rem]"} ${top ? "z-[70]" : "z-50"}`}>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          <div className="min-w-0">{label && <div className="t-label">{label}</div>}<div className="truncate text-[17px] font-semibold leading-tight">{title}</div></div>
+          <button aria-label="Close" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line hover:bg-surface"><Icon n="x" s={16} /></button>
+        </div>
+        <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto bg-surface">{children}</div>
+        {footer && <div className="flex shrink-0 items-center gap-3 border-t border-line bg-white px-5 py-3">{footer}</div>}
+      </aside>
+    </>
+  );
+}
+
+export interface ActiveFilter { label: string; value: string; clear: () => void }
+
+/** Filters stay behind one button; only the ones in use show, as removable chips. */
+export function FilterBar({ active, children, onReset, className = "", alignRight }: { active: ActiveFilter[]; children: React.ReactNode; onReset?: () => void; className?: string; alignRight?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const chips = active.map((f) => <span key={f.label + f.value} className="inline-flex items-center gap-1 rounded-md border border-line bg-white py-1 pl-2.5 pr-1 text-[12.5px]"><span className="text-muted">{f.label}:</span> <span className="font-medium">{f.value}</span><button aria-label={`Clear ${f.label}`} onClick={f.clear} className="grid h-5 w-5 place-items-center rounded text-muted hover:bg-surface hover:text-ink"><Icon n="x" s={11} /></button></span>);
+  return (
+    <div className={`relative flex flex-wrap items-center gap-1.5 ${className}`}>
+      {alignRight && chips}
+      <button aria-label="Filters" aria-expanded={open} onClick={() => setOpen(!open)} className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-md border bg-white px-3 text-[13px] font-medium ${open ? "border-ink/40" : "border-line text-ink/80 hover:bg-surface"}`}>
+        <Icon n="sliders" s={15} /> Filters{active.length > 0 && <span className="num grid h-5 min-w-5 place-items-center rounded-full bg-brand px-1 text-[11px] font-semibold text-white">{active.length}</span>}
+      </button>
+      {!alignRight && chips}
+      {open && <>
+        <button aria-label="Close filters" className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+        <div className={`float pop absolute top-12 z-40 ${alignRight ? "right-0" : "left-0"} w-[min(20rem,calc(100vw-2rem))] space-y-3 rounded-md border border-line bg-white p-3`}>
+          {children}
+          {onReset && <button onClick={() => { onReset(); setOpen(false); }} className="w-full rounded-md border border-line px-3 py-2 text-[13px] font-medium hover:bg-surface">Reset</button>}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+export function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><span className="t-label mb-1 block">{label}</span>{children}</label>;
 }
