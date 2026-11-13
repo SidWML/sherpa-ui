@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { cn } from "cn";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -17,10 +17,13 @@ export function Choice({ value, onChange, options, placeholder = "Choose…", cl
   value: string; onChange: (v: string) => void; options: Option[]; placeholder?: string; className?: string; size?: "sm" | "default"; disabled?: boolean; id?: string; "aria-label"?: string;
 }) {
   const items = options.map(norm);
+  const box = useRef<HTMLButtonElement>(null); const [side, setSide] = useState<"top" | "bottom">("bottom");
+  /* a list near the bottom of the screen opens upwards, so it is never squeezed into a few pixels */
+  const measure = (open: boolean) => { if (!open) return; const r = box.current?.getBoundingClientRect(); if (r) setSide(window.innerHeight - r.bottom < 280 && r.top > window.innerHeight - r.bottom ? "top" : "bottom"); };
   return (
-    <Select items={items} value={value === "" ? null : value} onValueChange={(v) => onChange(v == null ? "" : String(v))} disabled={disabled}>
-      <SelectTrigger id={id} size={size} aria-label={aria} className={cn("w-full", className)}><SelectValue placeholder={placeholder} /></SelectTrigger>
-      <SelectContent alignItemWithTrigger={false}>
+        <Select items={items} value={value === "" ? null : value} onValueChange={(v) => onChange(v == null ? "" : String(v))} disabled={disabled} onOpenChange={measure}>
+      <SelectTrigger ref={box} id={id} size={size} aria-label={aria} className={cn("w-full", className)}><SelectValue placeholder={placeholder} /></SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} side={side} className="max-h-[min(var(--available-height),18rem)] min-w-[12rem]">
         {items.map((o) => <SelectItem key={o.value} value={o.value} disabled={o.disabled}>{o.label}</SelectItem>)}
       </SelectContent>
     </Select>

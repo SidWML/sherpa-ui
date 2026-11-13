@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { A, pointsOf, stepsOf, useApp, userOf } from "@/lib/store";
+import { A, pointsOf, reportActivity, stepsOf, useApp, userOf } from "@/lib/store";
 import { AREAS, PLACES, ROLE_LABEL, TEAM_NAME } from "@/lib/data";
 import type { LeadInfo as LeadInfoT, Preset, Report } from "@/lib/types";
 import { levelOf, type NavItem } from "../Shell";
@@ -213,7 +213,7 @@ function Leads({ openId, setOpenId, onSnap }: { openId: string | null; setOpenId
   const opps = Array.from(new Set(mine.map(oppLabel)));
   const areas = Array.from(new Set(mine.map((r) => r.area)));
   const areaName = (id: string) => AREAS.find((x) => x.id === id)?.name ?? id;
-  const upd = (r: Report) => r.timeline[r.timeline.length - 1]?.t ?? r.createdAt;
+  const upd = (r: Report) => reportActivity(r);
   const match = (r: Report) => {
     const x = leadInfo(r); const lc = q.trim().toLowerCase();
     return (f === "all" || x.st.grp === f) && (oppF === "all" || oppLabel(r) === oppF) && (tierF === "all" || x.tier === tierF) && (areaF === "all" || r.area === areaF)

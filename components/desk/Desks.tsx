@@ -1,12 +1,13 @@
 "use client";
 import { SnapSheet } from "./SnapSheet";
 import { useMemo, useState } from "react";
-import { A, H, effTier, exceptions, itemsFor, nowOf, stepsOf, useApp, userOf } from "@/lib/store";
+import { A, H, byRecent, effTier, exceptions, itemsFor, nowOf, stepsOf, useApp, userOf } from "@/lib/store";
 import { AREAS, GROUPS, PLACES, ROLE_LABEL, TEAM_NAME, TRACKS, USERS } from "@/lib/data";
 import type { Item, Report, Role, Team, Tier } from "@/lib/types";
 import { TerritoryMap } from "../hub/TerritoryMap";
 import { BidPage } from "./Bid";
 import { LeadReview } from "./LeadReview";
+import { askPromptFor } from "./OppBrowser";
 import { Shell, type NavItem } from "../Shell";
 import { Frame } from "../Frame";
 import { Alerts, Drawer } from "../shared";
@@ -45,7 +46,7 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
   const unread = s.alerts.filter((a) => a.userId === me!.id && !a.read).length;
   const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).length;
   const N = (id: string, label: string, icon: string, badge?: number, narrowOnly?: boolean): NavItem => ({ id, label, icon, badge: badge || undefined, narrowOnly });
-  const reviewing = s.sherpa.opps.filter((o) => o.stage === "review").length;
+  const reviewing = s.sherpa.opps.filter((o) => o.stage === "review" || (role === "mgr" && s.sherpa.tasks.some((x) => !x.done && x.oppId === o.id && x.forUser === me!.id))).length;
   const front = role === "tech" ? [N("work", "My visits", "pin", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)]
     : role === "sl" ? [N("work", "My jobs", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)]
     : sherpa ? [...(role === "mgr" ? [N("review", "Lead review", "flag", reviewing)] : []), N("work", "My work", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)] : [];
@@ -79,8 +80,8 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
     return (
       <>
         {!w && sherpa && <div className={v === "chat" ? "absolute inset-0" : "hidden"}><ChatHome seed={seed} openOpp={openOpp} openOffer={openOffer} go={goTo} /></div>}
-        {v === "review" && <LeadReview openOffer={openOffer} />}
-        {v === "work" && <MyWork openId={oppId} setOpenId={setOppId} openOffer={openOffer} onAsk={(o) => ask(`Where is ${o.id} (${o.placeName})?`)} />}
+        {v === "review" && <LeadReview openOffer={openOffer} onAsk={(o) => ask(askPromptFor(o))} />}
+        {v === "work" && <MyWork openId={oppId} setOpenId={setOppId} openOffer={openOffer} onAsk={(o) => ask(askPromptFor(o))} />}
         {v === "map" && <TerritoryMap onOpenOpp={openOpp} onAsk={(p) => ask(p)} />}
         {v === "portfolio" && <Portfolio onAsk={ask} />}
         {v === "campaigns" && <Marketing openOpp={openOpp} />}
@@ -241,7 +242,7 @@ function ManagerDesk() {
 
 function Board() {
   const { s } = useApp();
-  const items = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "lead" && !i.silent && i.team !== "AM").map((it) => ({ r, it })));
+  const items = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "lead" && !i.silent && i.team !== "AM").map((it) => ({ r, it }))).sort(byRecent);
   const cols: [string, (i: Item) => boolean][] = [["New", (i) => i.status === "new"], ["Accepted", (i) => i.status === "accepted" && i.step < stepsOf(i).length - 2], ["Late stage", (i) => i.status === "accepted" && i.step >= stepsOf(i).length - 2], ["Closed", (i) => i.status === "closed"]];
   return (
     <Page title="Team board" sub="Leads in your area by stage.">
@@ -271,7 +272,7 @@ function PointsCheck() {
 /* ---------------- Records steward ---------------- */
 function RecordsDesk() {
   const { s } = useApp();
-  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.team === "RS" && i.kind !== "note").map((it) => ({ r, it }))).sort((a, b) => a.it.createdAt - b.it.createdAt);
+  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.team === "RS" && i.kind !== "note").map((it) => ({ r, it }))).sort(byRecent);
   const open = rows.filter((x) => x.it.status !== "closed");
   const done = rows.filter((x) => x.it.status === "closed");
   const [tab, setTab] = useState<"open" | "done">("open");
@@ -316,7 +317,7 @@ function RecordsDesk() {
 /* ---------------- Emergency desk ---------------- */
 function EmergencyDesk() {
   const { s } = useApp();
-  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "emergency").map((it) => ({ r, it }))).sort((a, b) => b.it.createdAt - a.it.createdAt);
+  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => i.kind === "emergency").map((it) => ({ r, it }))).sort(byRecent);
   const open = rows.filter((x) => x.it.status !== "closed"); const closed = rows.filter((x) => x.it.status === "closed");
   const [tab, setTab] = useState<"open" | "closed">("open");
   const list = tab === "open" ? open : closed;
@@ -362,7 +363,7 @@ function EmergencyDesk() {
 /* ---------------- Service team ---------------- */
 function ServiceDesk() {
   const { s } = useApp();
-  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => (i.team === "SVC" && i.kind !== "emergency") || (i.kind === "emergency" && i.also.includes("SVC"))).map((it) => ({ r, it })));
+  const rows = s.reports.filter((r) => r.status === "sent").flatMap((r) => r.items.filter((i) => (i.team === "SVC" && i.kind !== "emergency") || (i.kind === "emergency" && i.also.includes("SVC"))).map((it) => ({ r, it }))).sort(byRecent);
   const open = rows.filter((x) => x.it.status !== "closed"); const closed = rows.filter((x) => x.it.status === "closed");
   const [tab, setTab] = useState<"open" | "closed">("open");
   const list = tab === "open" ? open : closed;

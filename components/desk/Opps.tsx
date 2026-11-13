@@ -12,7 +12,7 @@ import { Back, Fold, Label } from "./Action";
 import { Page } from "./Common";
 import { OfferPill } from "./Offers";
 import { CHOICE, Field, Panel, Q } from "./Step";
-import { AgreedPanel, ApproveWinPanel, BidConfirmPanel, BidReviewPanel, ConfigNI, FindContactNI, FollowupNI, HandoverPack, JobPanel, LossMemory, OrderPanel, ResearchPanel, TalkPanel, Talks } from "./NewInstall";
+import { AccountUpdatePanel, HandoverOfferPanel, AgreedPanel, ApproveWinPanel, BidConfirmPanel, BidReviewPanel, ConfigNI, FindContactNI, FollowupNI, HandoverPack, JobPanel, LossMemory, OrderPanel, ResearchPanel, TalkPanel, Talks } from "./NewInstall";
 import { ContractPill } from "./Contract";
 import { Why } from "../Why";
 import { leadScore } from "@/lib/scores";
@@ -149,7 +149,7 @@ export function OppPage({ id, onBack, openOffer, embedded }: { id: string; onBac
 }
 
 /* ------------------------------------------------------------------ the step in front of me */
-function TaskPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: string) => void }) {
+export function TaskPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: string) => void }) {
   const { s, me, mutate } = useApp();
   const by = me!.id; const iid = o.source.itemId;
   const [f, setF] = useState({ name: "", role: "", phone: "", email: "", note: "", how: "Phone call", route: "" , reason: "Not a real opportunity", days: "30", to: "" });
@@ -166,6 +166,8 @@ function TaskPanel({ o, t, openOffer }: { o: Opp; t: Task; openOffer: (id: strin
     if (t.kind === "config") return <ConfigNI o={o} t={t} openOffer={openOffer} />;
     if (t.kind === "followup") return <FollowupNI o={o} t={t} openOffer={openOffer} />;
   }
+  if (t.kind === "accountAction" && o.order) return <AccountUpdatePanel o={o} t={t} />;
+  if (t.kind === "handover" && /^(Offer a|Handover pack)/.test(t.title)) return <HandoverOfferPanel o={o} t={t} openOffer={openOffer} />;
   if (t.kind === "bidReview") return <BidReviewPanel o={o} t={t} openOffer={openOffer} />;
   if (t.kind === "bidConfirm") return <BidConfirmPanel o={o} t={t} openOffer={openOffer} />;
   if (t.kind === "agreed") return <AgreedPanel o={o} t={t} />;

@@ -23,6 +23,18 @@ export function Frame({ agent, sub = "Sales Transformation Hub", icon = "sparkle
   const device = useDeviceSwitch();
   const [menu, setMenu] = useState(false);
   const root = useRef<HTMLDivElement>(null); const [wide, setWide] = useState(false);
+  /* the side chat can be dragged wider or narrower; the choice is remembered on this device */
+  const [sideW, setSideW] = useState(432); const [drag, setDrag] = useState(false);
+  useEffect(() => { try { const v = Number(localStorage.getItem("sherpa.sideW")); if (v >= 320) setSideW(v); } catch { /* storage can be blocked */ } }, []);
+  const clampW = (w: number) => Math.round(Math.max(320, Math.min(w, Math.max(320, (root.current?.clientWidth ?? 1400) - 560))));
+  const saveW = (w: number) => { try { localStorage.setItem("sherpa.sideW", String(w)); } catch { /* ignore */ } };
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault(); setDrag(true);
+    const move = (ev: PointerEvent) => { const r = root.current?.getBoundingClientRect(); if (r) setSideW(clampW(r.right - ev.clientX)); };
+    const up = (ev: PointerEvent) => { const r = root.current?.getBoundingClientRect(); if (r) saveW(clampW(r.right - ev.clientX)); setDrag(false); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const nudge = (e: React.KeyboardEvent) => { if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; e.preventDefault(); const w = clampW(sideW + (e.key === "ArrowLeft" ? 32 : -32)); setSideW(w); saveW(w); };
   useEffect(() => {
     const el = root.current; if (!el) return;
     const ro = new ResizeObserver(() => { const w = el.clientWidth >= 1180; setWide(w); onWide?.(w); }); ro.observe(el);
@@ -33,7 +45,7 @@ export function Frame({ agent, sub = "Sales Transformation Hub", icon = "sparkle
   const xp = gameOf(s, me.id).xp;
   const shown = tabs.filter((t) => !(wide && t.narrowOnly));
   return (
-    <div ref={root} className={`@container flex w-full flex-col bg-surface ${framed ? "h-full" : "h-dvh"}`}>
+    <div ref={root} className={`@container flex w-full flex-col bg-surface ${framed ? "h-full" : "h-dvh"} ${drag ? "select-none cursor-col-resize" : ""}`}>
       {framed && <StatusBar />}
       <header className="relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-white px-3 @3xl:px-5">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -72,7 +84,13 @@ export function Frame({ agent, sub = "Sales Transformation Hub", icon = "sparkle
       </nav>}
       <div className="flex min-h-0 flex-1">
         <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto">{typeof children === "function" ? children(wide) : children}</main>
-        {wide && side && <aside className="relative flex w-[27rem] shrink-0 flex-col border-l border-line bg-white">{side}</aside>}
+        {wide && side && <aside style={{ width: clampW(sideW) }} className="relative flex shrink-0 flex-col border-l border-line bg-white">
+          <div role="separator" aria-orientation="vertical" aria-label="Resize the chat. Drag, or use the left and right arrow keys." tabIndex={0} onPointerDown={startDrag} onKeyDown={nudge} onDoubleClick={() => { setSideW(432); saveW(432); }} title="Drag to resize · double-click to reset" className="group absolute -left-1.5 top-0 z-20 flex h-full w-3 cursor-col-resize items-center justify-center outline-none">
+            <span className={`h-full w-0.5 transition ${drag ? "bg-brand" : "bg-transparent group-hover:bg-brand/60 group-focus-visible:bg-brand"}`} />
+            <span className={`absolute top-1/2 grid h-10 w-3.5 -translate-y-1/2 place-items-center rounded-full border border-line bg-white text-[8px] leading-none text-muted shadow-sm transition ${drag ? "border-brand text-brand" : "group-hover:border-brand/60"}`}>⋮</span>
+          </div>
+          {side}
+        </aside>}
       </div>
       {framed && <div className="shrink-0 bg-surface" style={{ height: SCREEN.homeArea }} />}
     </div>
