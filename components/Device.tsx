@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useContext, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { PortalRoot } from "@/lib/portal";
 
 type Device = "phone" | "desktop";
 
@@ -36,14 +37,15 @@ const useViewportHeight = () => useSyncExternalStore(subResize, () => window.inn
  *  The screen's transform keeps fixed overlays (sheets, toasts) inside it. */
 export function Phone({ children, below }: { children: ReactNode; below?: ReactNode }) {
   const scale = Math.min(1, Math.max(0.4, (useViewportHeight() - ROOM) / DEVICE.h));
+  const [screen, setScreen] = useState<HTMLDivElement | null>(null);
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-gradient-to-br from-zinc-200 via-zinc-100 to-rose-100 p-4">
       <div className="relative shrink-0" style={{ width: DEVICE.w * scale, height: DEVICE.h * scale }}>
         <div className="absolute left-0 top-0 origin-top-left rounded-[67px] bg-zinc-900 shadow-[0_30px_80px_rgba(0,0,0,.35)] ring-2 ring-zinc-700" style={{ width: DEVICE.w, height: DEVICE.h, padding: BEZEL, transform: `scale(${scale})` }}>
           <div className="absolute -left-[3px] top-[180px] h-8 w-[3px] rounded-l bg-zinc-700" /><div className="absolute -left-[3px] top-[240px] h-16 w-[3px] rounded-l bg-zinc-700" /><div className="absolute -left-[3px] top-[320px] h-16 w-[3px] rounded-l bg-zinc-700" /><div className="absolute -right-[3px] top-[270px] h-24 w-[3px] rounded-r bg-zinc-700" />
-          <div className="relative h-full w-full overflow-hidden bg-white" style={{ borderRadius: SCREEN.radius, transform: "translateZ(0)", "--safe-top": `${SCREEN.statusBar}px`, "--safe-bottom": `${SCREEN.homeArea}px` } as CSSProperties}>
+          <div ref={setScreen} className="relative h-full w-full overflow-hidden bg-white" style={{ borderRadius: SCREEN.radius, transform: "translateZ(0)", "--safe-top": `${SCREEN.statusBar}px`, "--safe-bottom": `${SCREEN.homeArea}px` } as CSSProperties}>
             <div className="pointer-events-none absolute left-1/2 top-[11px] z-[60] h-[37px] w-[126px] -translate-x-1/2 rounded-full bg-black" />
-            {children}
+            <PortalRoot.Provider value={screen}>{children}</PortalRoot.Provider>
             <div className="pointer-events-none absolute bottom-2 left-1/2 z-[60] h-[5px] w-[134px] -translate-x-1/2 rounded-full bg-black/80" />
           </div>
         </div>

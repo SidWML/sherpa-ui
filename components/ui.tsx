@@ -1,10 +1,14 @@
 "use client";
+import { cn } from "cn";
+import { Button } from "@/components/ui/button";
 import type { ReactNode } from "react";
 import type { Item, Photo, Tier } from "@/lib/types";
 import { TRACKS } from "@/lib/data";
 
 const P: Record<string, string> = {
   camera: "M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 100-8 4 4 0 000 8z",
+  tag: "M3 12V4h8l10 10-8 8L3 12zM7.5 8.5h.01",
+  upload: "M12 16V4M7 9l5-5 5 5M4 16v4h16v-4",
   flame: "M12 2c.8 3.6 5 5 5 10a5 5 0 01-10 0c0-2.2 1-3.4 2-4.4.2 1.8 1 2.6 2 2.8C11.2 8 11 5 12 2z",
   snow: "M12 3v18M4.5 7.5l15 9M19.5 7.5l-15 9",
   sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M7 10v4M17 16v4",
@@ -65,16 +69,15 @@ export function Avatar({ initials, tone = "brand" }: { initials: string; tone?: 
 
 type BtnProps = { children: ReactNode; onClick?: () => void; v?: "primary" | "ghost" | "soft" | "danger" | "dark"; disabled?: boolean; full?: boolean; sm?: boolean; className?: string; type?: "button" | "submit" };
 export function Btn({ children, onClick, v = "primary", disabled, full, sm, className = "", type = "button" }: BtnProps) {
-  const base = "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition active:scale-[.98] disabled:opacity-40";
-  const size = sm ? "min-h-9 px-3 text-[13px]" : "min-h-11 px-4 text-sm";
   const tone = {
-    primary: "bg-brand text-white hover:bg-brand-dark",
-    ghost: "border border-line bg-white text-ink hover:bg-surface",
-    soft: "bg-brand-soft text-brand hover:bg-red-100",
-    danger: "bg-red-700 text-white hover:bg-red-800",
-    dark: "bg-ink text-white hover:bg-black",
-  }[v];
-  return <button type={type} disabled={disabled} onClick={onClick} className={`${base} ${size} ${tone} ${full ? "w-full" : ""} ${className}`}>{children}</button>;
+    primary: { variant: "default", cls: "hover:bg-brand-dark" },
+    ghost: { variant: "outline", cls: "bg-white" },
+    soft: { variant: "secondary", cls: "bg-brand-soft text-brand hover:bg-red-100" },
+    danger: { variant: "destructive", cls: "bg-red-700 text-white hover:bg-red-800" },
+    dark: { variant: "default", cls: "bg-ink text-white hover:bg-black" },
+  } as const;
+  const t = tone[v];
+  return <Button type={type} disabled={disabled} onClick={onClick} variant={t.variant} className={cn(sm ? "h-auto min-h-9 px-3 text-[13px]" : "h-auto min-h-11 gap-2 px-4 text-sm", t.cls, full && "w-full", className)}>{children}</Button>;
 }
 
 export function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {

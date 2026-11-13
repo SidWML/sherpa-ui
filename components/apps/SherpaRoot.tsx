@@ -5,7 +5,7 @@ import { DeskApp } from "../desk/Desks";
 import { DemoPanel } from "../Demo";
 import { DeviceProvider, Phone, PreviewBar, useDevice } from "../Device";
 
-const PHONE_ROLES = ["ni", "ei", "sc", "mod"];
+const PHONE_ROLES = ["ni", "ei", "sc", "mod", "tech"];
 
 function Inner() {
   const { me } = useApp();

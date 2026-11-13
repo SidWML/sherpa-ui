@@ -1,4 +1,5 @@
 "use client";
+import { Check, Choice, Input as TextField, Textarea } from "@/components/form";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AREAS, CASES, GROUPS, PLACES, PRESETS, TEAM_NAME, TRACKS } from "@/lib/data";
 import { evaluate, presetToInput, teamsOf } from "@/lib/engine";
@@ -232,14 +233,7 @@ export function Snap({ preset, onExit, onOpen }: { preset?: Preset | null; onExi
 
           <div className="mt-3 rounded-xl border border-dashed border-brand/50 bg-brand-soft/60 p-3">
             <label className="text-[11px] font-bold uppercase tracking-wide text-brand">Demo: what do the photos show?</label>
-            <select value={scn?.id ?? ""} onChange={(e) => { const p = PRESETS.find((x) => x.id === e.target.value) ?? null; setScn(p); if (p) { setPhotos(samplePhotos(p)); setEquip(p.equip); setLater(p.placeSrc === "later"); if (p.placeSrc === "typed") { setMode("typed"); setTyped({ name: "Skyline Business Centre", addr: "Road No. 36, Jubilee Hills, Hyderabad", area: "HYW" }); } if (p.offline && !s.offline) mutate((st) => { st.offline = true; }); setPlace(null); setGps("idle"); } }} className="mt-1 w-full rounded-lg border border-line bg-white px-2 py-2 text-sm">
-              <option value="">Choose a scenario to load sample photos…</option>
-              {Object.entries(GROUPS).map(([g, gn]) => (
-                <optgroup key={g} label={`${g} · ${gn}`}>
-                  {PRESETS.filter((p) => p.group === g).map((p) => <option key={p.id} value={p.id}>{p.pilot ? "● " : ""}{p.id} · {p.title}</option>)}
-                </optgroup>
-              ))}
-            </select>
+            <Choice className="mt-1" value={scn?.id ?? ""} placeholder="Choose a scenario to load sample photos…" options={Object.keys(GROUPS).flatMap((g) => PRESETS.filter((p) => p.group === g).map((p) => ({ value: p.id, label: `${p.pilot ? "● " : ""}${p.id} · ${p.title}` })))} onChange={(id) => { const p = PRESETS.find((x) => x.id === id) ?? null; setScn(p); if (p) { setPhotos(samplePhotos(p)); setEquip(p.equip); setLater(p.placeSrc === "later"); if (p.placeSrc === "typed") { setMode("typed"); setTyped({ name: "Skyline Business Centre", addr: "Road No. 36, Jubilee Hills, Hyderabad", area: "HYW" }); } if (p.offline && !s.offline) mutate((st) => { st.offline = true; }); setPlace(null); setGps("idle"); } }} />
             {scn && <p className="mt-1.5 text-xs text-ink/80"><b>Tip:</b> {scn.tip}</p>}
           </div>
 
@@ -295,7 +289,7 @@ export function Snap({ preset, onExit, onOpen }: { preset?: Preset | null; onExi
               )}
               {mode === "search" && (
                 <div className="rounded-xl border border-line p-3">
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search known buildings…" className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" />
+                  <TextField value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search known buildings…" />
                   <div className="mt-2 max-h-44 space-y-1 overflow-auto">{PLACES.filter((p) => p.name.toLowerCase().includes(q.toLowerCase())).map((p) => (
                     <button key={p.id} onClick={() => { setPlace({ id: p.id, name: p.name, area: p.area, type: p.type, key: p.key }); setWarn(p.type === "hospital" || p.type === "gov" || p.type === "transport"); }} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${place?.id === p.id ? "bg-brand-soft" : "hover:bg-surface"}`}><span>{p.name}<span className="block text-[11px] text-muted">{p.addr}</span></span>{place?.id === p.id && <Icon n="check" s={16} c="#e3001b" />}</button>
                   ))}</div>
@@ -303,15 +297,15 @@ export function Snap({ preset, onExit, onOpen }: { preset?: Preset | null; onExi
               )}
               {mode === "typed" && (
                 <div className="space-y-2 rounded-xl border border-line p-3">
-                  <input value={typed.name} onChange={(e) => setTyped({ ...typed, name: e.target.value })} placeholder="Building name" className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" />
-                  <input value={typed.addr} onChange={(e) => setTyped({ ...typed, addr: e.target.value })} placeholder="Address" className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" />
-                  <select value={typed.area} onChange={(e) => setTyped({ ...typed, area: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm">{AREAS.map((a) => <option key={a.id} value={a.id}>Sales area: {a.name}</option>)}</select>
+                  <TextField value={typed.name} onChange={(e) => setTyped({ ...typed, name: e.target.value })} placeholder="Building name" />
+                  <TextField value={typed.addr} onChange={(e) => setTyped({ ...typed, addr: e.target.value })} placeholder="Address" />
+                  <Choice aria-label="Sales area" value={typed.area} onChange={(v) => setTyped({ ...typed, area: v })} options={AREAS.map((a) => ({ value: a.id, label: `Sales area: ${a.name}` }))} />
                   <Btn sm v="soft" disabled={!typed.name || !typed.addr} onClick={() => setPlace({ id: "new", name: typed.name, area: typed.area, type: "office", isNew: true })}>Use this new place</Btn>
                   {place?.isNew && <p className="text-xs text-emerald-700">New place saved. The records team will verify it. Your report routes by the area you chose until then.</p>}
                 </div>
               )}
             </div>
-            <label className="mt-2 flex items-center gap-2 text-xs text-muted"><input type="checkbox" className="accent-[#e3001b]" checked={later} onChange={(e) => setLater(e.target.checked)} /> I am not at the site now (report later)</label>
+            <Check className="mt-2 flex text-xs text-muted" checked={later} onChange={setLater}>I am not at the site now (report later)</Check>
           </div>
 
           <div className="mt-6"><Btn full disabled={!photos.length} onClick={() => { if (!place) { setPlace({ id: geo.id, name: geo.name, area: geo.area, type: geo.type, key: geo.key }); } setTimeout(analyse, 0); }}>Analyse Photos <Icon n="sparkle" s={16} /></Btn>
@@ -405,7 +399,7 @@ export function Snap({ preset, onExit, onOpen }: { preset?: Preset | null; onExi
                 </button>
               ))}
               {numInput !== null && (
-                <div className="flex gap-2"><input autoFocus value={numInput} onChange={(e) => setNumInput(e.target.value)} placeholder="Unit number" className="min-h-11 flex-1 rounded-xl border border-line px-3 text-sm" /><Btn disabled={!numInput} onClick={() => answer("number", "type", numInput, numInput)}>Send</Btn></div>
+                <div className="flex gap-2"><TextField autoFocus value={numInput} onChange={(e) => setNumInput(e.target.value)} placeholder="Unit number" className="h-11 flex-1" /><Btn disabled={!numInput} onClick={() => answer("number", "type", numInput, numInput)}>Send</Btn></div>
               )}
               <button onClick={() => answer(curQ, curQ === "number" ? "cant" : "unsure", "Not sure")} className={`${curQ === "number" || curQ === "condition" || curQ === "sticker" || curQ === "units" || curQ === "stage" || curQ === "ordered" ? "hidden" : ""} text-xs text-muted underline`}>Not sure</button>
             </div>
@@ -472,13 +466,13 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 function ManualEntry({ v, set }: { v: { brand: string; number: string; age: number; equip: string }; set: (x: { brand: string; number: string; age: number; equip: string }) => void }) {
-  const cls = "min-h-10 w-full rounded-lg border border-line bg-white px-3 text-sm";
+  const cls = "mt-1";
   return (
     <div className="grid grid-cols-2 gap-2">
-      <label className="text-xs text-muted">Equipment<select className={cls} value={v.equip} onChange={(e) => set({ ...v, equip: e.target.value })}><option value="lift">Lift / elevator</option><option value="escalator">Escalator</option><option value="walk">Moving walk</option></select></label>
-      <label className="text-xs text-muted">Brand<select className={cls} value={v.brand} onChange={(e) => set({ ...v, brand: e.target.value })}><option value="ours">Schindler</option><option value="other">Another company</option><option value="unclear">Unclear</option></select></label>
-      <label className="text-xs text-muted">Unit number<input className={cls} value={v.number} onChange={(e) => set({ ...v, number: e.target.value })} placeholder="e.g. 74821" /></label>
-      <label className="text-xs text-muted">Estimated age (years)<input type="number" className={cls} value={v.age} onChange={(e) => set({ ...v, age: Number(e.target.value) })} /></label>
+      <label className="text-xs text-muted">Equipment<Choice aria-label="Equipment" className={cls} value={v.equip} onChange={(x) => set({ ...v, equip: x })} options={[{ value: "lift", label: "Lift / elevator" }, { value: "escalator", label: "Escalator" }, { value: "walk", label: "Moving walk" }]} /></label>
+      <label className="text-xs text-muted">Brand<Choice aria-label="Brand" className={cls} value={v.brand} onChange={(x) => set({ ...v, brand: x })} options={[{ value: "ours", label: "Schindler" }, { value: "other", label: "Another company" }, { value: "unclear", label: "Unclear" }]} /></label>
+      <label className="text-xs text-muted">Unit number<TextField className={cls} value={v.number} onChange={(e) => set({ ...v, number: e.target.value })} placeholder="e.g. 74821" /></label>
+      <label className="text-xs text-muted">Estimated age (years)<TextField type="number" className={cls} value={v.age} onChange={(e) => set({ ...v, age: Number(e.target.value) })} /></label>
     </div>
   );
 }
@@ -511,8 +505,8 @@ function SentView({ report, onOpen, onDone }: { report?: ReturnType<typeof useAp
             <button onClick={() => setOpen(open === "note" ? "" : "note")} className="rounded-xl border border-line py-2.5">Note +5</button>
             <AddPhoto id={report.id} />
           </div>
-          {open === "contact" && <div className="mt-3 space-y-2"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name and role (e.g. Facility manager)" className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" /><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" /><Btn sm disabled={!name} onClick={() => { void applyExtra(mutate, report.id, "contact", `${name}${phone ? ` · ${phone}` : ""}`); setOpen(""); }}>Add contact</Btn></div>}
-          {open === "note" && <div className="mt-3 space-y-2"><textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything else the owner should know?" className="min-h-20 w-full rounded-lg border border-line p-3 text-sm" /><Btn sm disabled={!note} onClick={() => { void applyExtra(mutate, report.id, "note", note); setOpen(""); }}>Add note</Btn></div>}
+          {open === "contact" && <div className="mt-3 space-y-2"><TextField value={name} onChange={(e) => setName(e.target.value)} placeholder="Name and role (e.g. Facility manager)" /><TextField value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" /><Btn sm disabled={!name} onClick={() => { void applyExtra(mutate, report.id, "contact", `${name}${phone ? ` · ${phone}` : ""}`); setOpen(""); }}>Add contact</Btn></div>}
+          {open === "note" && <div className="mt-3 space-y-2"><Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything else the owner should know?" /><Btn sm disabled={!note} onClick={() => { void applyExtra(mutate, report.id, "note", note); setOpen(""); }}>Add note</Btn></div>}
           <div className="mt-2 flex flex-wrap gap-1 text-[11px] text-muted">{report.extras.contact && <Pill tone="green">Contact added</Pill>}{report.extras.note && <Pill tone="green">Note added</Pill>}{report.extras.photos > 0 && <Pill tone="green">{report.extras.photos} photo(s) added</Pill>}</div>
         </Card>
       )}

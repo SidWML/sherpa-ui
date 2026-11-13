@@ -1,5 +1,5 @@
 export type Team = "SC" | "EI" | "MOD" | "NI" | "RS" | "SVC" | "ED" | "MGR" | "AM" | "TENDER";
-export type Role = "reporter" | "sc" | "ei" | "mod" | "ni" | "am" | "mgr" | "rs" | "ed" | "svc" | "lead" | "admin" | "ss" | "mkt";
+export type Role = "reporter" | "sc" | "ei" | "mod" | "ni" | "am" | "mgr" | "rs" | "ed" | "svc" | "lead" | "admin" | "ss" | "mkt" | "tech" | "sl";
 export type Tier = "Hot" | "Warm" | "Cold" | "Info";
 export type TrackKey =
   | "records" | "noted" | "fault" | "renewal" | "winback" | "sales" | "modernisation"
@@ -52,6 +52,11 @@ export interface Input {
   lowConfidence: boolean;
   dangerPhoto?: boolean;
   lostBid?: boolean;
+  reason?: "fault" | "complaint" | "old" | "contract" | "passing";
+  reasonDetail?: string;
+  inCharge?: "fm" | "owner" | "security" | "unknown";
+  ownerTalk?: "open" | "no" | "none";
+  servicerMood?: "unhappy" | "happy" | "unknown";
 }
 
 export interface Draft {
@@ -106,6 +111,13 @@ export interface Item extends Draft {
 
 export interface Photo { id: string; label: string; kind: "plate" | "panel" | "sticker" | "cabin" | "site" | "board" | "user"; text?: string; url?: string }
 
+/** Lead details the reporter can correct after sending. Every value is text as typed. */
+export interface LeadInfo {
+  contactName: string; contactPhone: string; contactEmail: string; role: string;
+  address: string; city: string; postalCode: string; country: string;
+  manufacturer: string; serialNumber: string; maintainer: string; elevators: string; floors: string; capacity: string;
+}
+
 export interface Report {
   id: string; reporterId: string; createdAt: number;
   status: "queued" | "sent";
@@ -117,6 +129,7 @@ export interface Report {
   extras: { contact?: string; note?: string; photos: number };
   headline: string; verdict: Outcome["verdict"]; plain: string[];
   impact?: boolean; fake?: boolean; trusted: boolean;
+  info?: LeadInfo;
 }
 
 export interface Alert { id: string; userId: string; t: number; text: string; reportId?: string; offerId?: string; read: boolean }
@@ -128,6 +141,8 @@ export interface Config {
   base: { ourOther: number; site: number; ended: number; ourMissingProblem: number; keyCustomer: number; ourProblem: number; otherLocal: number; veryOld: number; otherMaker: number };
   followUp: { hot: [number, number, number]; warm: [number, number, number] };
   dailyLimit: number;
+  /** Every quotation and bid needs the Sales Manager. Off: only discounts above the seller guideline do. */
+  approveAll: boolean;
   owners: Record<string, Partial<Record<Team, string>>>;
 }
 
@@ -155,7 +170,11 @@ export type ProductKey = "renewal" | "maintenance" | "repair" | "modernisation" 
 export interface Account {
   id: string; name: string; area: string; key?: boolean; placeIds: string[]; owner: string; lastActivity: number;
   contact: { name: string; role: string; email: string }; lines: { ni: boolean; ei: boolean; sc: boolean; mod: boolean }; lostBids?: string;
+  contacts?: { name: string; role: string; phone?: string; email?: string }[];
+  plan?: AccountPlan;
+  activity?: LogEntry[];
 }
+export interface AccountPlan { goal: string; updatedBy: string; updatedAt: number; actions: { id: string; text: string; owner: string; due: number; done: boolean }[] }
 export interface Asset {
   id: string; accountId: string; placeId: string; label: string; model: string; ageYears: number; brand: "ours" | "other";
   contractEnd?: number; contractValue?: number; callbacks14d: number; callbacks90d: number; callbacksPrev90d: number; faults90d: number;
@@ -165,27 +184,82 @@ export interface Asset {
 export interface Tender {
   id: string; name: string; accountId: string; area: string; owner: string; line: "ni" | "sc" | "mod";
   stage: "matched" | "qualifying" | "bidding" | "final" | "submitted" | "won" | "lost"; eord: number; value: number; lifts: number;
-  summary: string; competitorSpec?: string; lossNote?: string; discovered: number; oppId?: string; checklist: { t: string; done: boolean }[];
+  summary: string; competitorSpec?: string; lossNote?: string; discovered: number; oppId?: string; checklist: { t: string; done: boolean }[]; letter?: DraftReview;
   /** Set when the Sales Manager has created the bid. */
   bid?: { by: string; at: number; discountPct: number };
+  doc?: TenderDoc;
+  /** The owner submitted the draft bid; the Sales Manager has not approved it yet. */
+  draft?: { by: string; at: number; discountPct: number; answers: Record<string, string> };
 }
-export interface MLead { id: string; name: string; source: string; area: string; createdAt: number; owner?: string; status: "new" | "working" | "converted" | "dropped"; interest: string; score: number }
-export interface Campaign { id: string; name: string; segment: string; area: string; size: number; status: "draft" | "live" | "done"; createdBy: string; createdAt: number; message?: { subject: string; body: string }; leads: number }
-export type TaskKind = "accept" | "findContact" | "research" | "contact" | "visit" | "qualify" | "config" | "bid" | "compliance" | "approve" | "revise" | "send" | "followup" | "handover" | "assign" | "other";
+export interface MLead {
+  id: string; name: string; source: string; area: string; createdAt: number; owner?: string; status: "new" | "working" | "converted" | "dropped" | "nurture" | "review";
+  interest: string; score: number;
+  campaignId?: string; accountId?: string; contact?: { name: string; role: string; email?: string; phone?: string };
+  scoreWhy?: Reason[]; oppId?: string; kind?: Opp["kind"];
+}
+export interface Audience { areas: string[]; minAge: number; brand: "any" | "ours" | "other"; contractEnding: boolean; buildingTypes: BuildingType[]; snapped: boolean }
+export interface Campaign {
+  id: string; name: string; segment: string; area: string; size: number; status: "draft" | "live" | "done"; createdBy: string; createdAt: number; message?: { subject: string; body: string }; leads: number;
+  audience?: Audience; goal?: Opp["kind"]; funnel?: { sent: number; opened: number; clicked: number; replied: number }; launchedAt?: number;
+}
+export interface Contract {
+  id: string; oppId: string; offerId: string; accountId: string; product: ProductKey; title: string;
+  status: "draft" | "check" | "approval" | "signature" | "active";
+  value: number; term: number; start: number; scope: string[]; sla?: string;
+  payment: { label: string; pct: number }[]; clauses: { key: string; title: string; text: string; on: boolean; optional: boolean }[];
+  flags?: { text: string; ok: boolean }[]; signedBy?: string; signedAt?: number; createdAt: number; log: LogEntry[]; review?: DraftReview;
+}
+export type TaskKind = "contractDraft" | "contractCheck" | "contractApprove" | "contractSign" | "accountAction" | "review" | "siteVisit" | "dealSetup" | "tenderDoc" | "quoteBrief" | "approveBid" | "accept" | "findContact" | "research" | "contact" | "visit" | "qualify" | "config" | "bid" | "compliance" | "approve" | "revise" | "send" | "followup" | "handover" | "assign" | "bidReview" | "bidConfirm" | "agreed" | "approveWin" | "order" | "job" | "other";
 export interface Task { id: string; title: string; detail?: string; by: string; forUser?: string; accountId?: string; oppId?: string; kind?: TaskKind; due: number; done: boolean; createdAt: number; doneAt?: number; result?: string; source: string }
 /** One record from the first sighting to the won deal. Lead, tender and offer are stages of it, not separate lists. */
-export type OppStage = "new" | "contact" | "visit" | "qualify" | "bid" | "offer" | "sent" | "won" | "lost" | "closed";
+export type OppStage = "review" | "new" | "contact" | "visit" | "qualify" | "bid" | "offer" | "sent" | "contract" | "order" | "won" | "lost" | "closed";
 export interface Opp {
+  contractId?: string;
   id: string; title: string; kind: "newbuild" | "existing" | "renewal" | "modernisation" | "project";
   accountId?: string; placeName: string; area: string; owner: string; unrouted?: boolean;
   stage: OppStage; createdAt: number; closedAt?: number; value?: number;
-  source: { type: "snap" | "tender" | "nba" | "campaign"; reportId?: string; itemId?: string; reporter?: string; label: string };
+  source: { type: "snap" | "tender" | "nba" | "campaign" | "account"; reportId?: string; itemId?: string; reporter?: string; label: string };
   contact?: { name: string; role: string; phone?: string; email?: string; via: string };
   tenderId?: string; offerId?: string; visitBy?: string; visited?: boolean;
   /** Where it is on the map, when the place is not in the places list. */
   geo?: { lat: number; lng: number };
+  /** The area owner the rules suggest while the Sales Manager reviews the lead. */
+  suggested?: string;
+  tier?: Tier; score?: number; reasons?: Reason[];
+  technician?: string;
+  site?: SiteVisit;
+  notes?: LogEntry[];
   log: LogEntry[];
+  research?: Research;
+  talks?: Talk[];
+  agreed?: Agreement;
+  order?: { number: string; delivery: number; payment: string; by: string; at: number };
+  job?: { lead: string; start?: number; siteContact?: { name: string; phone?: string }; acceptedAt?: number };
+  lostReason?: string;
 }
+export interface Finding { id: string; source: string; kind: "contact" | "owner" | "tender"; title: string; detail: string; contact?: { name: string; role: string; phone?: string; email?: string }; file?: string }
+export interface Research { want: string[]; by: string; at: number; shared?: string[]; tenderFile?: string }
+export type TalkOutcome = "quote" | "tender" | "callback" | "notInterested";
+export interface Talk {
+  by: string; at: number; how: string; with: { name: string; role: string; phone?: string }; said: string;
+  wants: { lifts: string; floors: string; when: string }; outcome: TalkOutcome; callbackDays?: number; reason?: string; tenderFile?: string; eordDays?: number;
+}
+export interface Agreement { price: number; start: number; how: string; proof: string; by: string; at: number }
+export interface DocComment { id: string; section: string; by: string; at: number; text: string; resolved?: boolean }
+/** Changes people made to a SHERPA draft. Unedited sections stay generated from the record, so they follow price and scope changes. */
+export interface DraftReview { texts: Record<string, { text: string; by: string; at: number }>; dismissed: string[]; comments: DocComment[]; log: LogEntry[] }
+export interface SiteVisit {
+  by: string; at: number;
+  met: { name: string; role: string; phone?: string };
+  lifts: string; floors: string; condition: string; decision: string; timeline: string; competitor: string; note: string;
+}
+export interface TenderDoc {
+  name: string; size: number; at: number;
+  found: { label: string; value: string; page: number }[];
+  gaps: { key: string; q: string; opts: string[]; a?: string }[];
+}
+export interface QuoteBrief { floors: string; load: string; speed: string; finish: string; timeline: string; extras: string }
+export interface ChatMsg { from: "us" | "customer"; by: string; t: number; text: string; file?: string }
 export interface Past { id: string; area: string; product: ProductKey; price: number; discountPct: number; outcome: "won" | "lost"; at: number; customer: string }
 export interface Approval { by: string; status: "pending" | "approved" | "changes" | "rejected"; reason?: string; at?: number }
 export interface Offer {
@@ -196,9 +270,10 @@ export interface Offer {
   approvals: Approval[]; email?: { subject: string; body: string };
   source?: { reportId: string; itemId: string }; fromNba?: string; log: LogEntry[];
   missing?: string[]; contractChange?: string; oppId?: string;
+  brief?: QuoteBrief; chat?: ChatMsg[]; attachment?: string; review?: DraftReview;
 }
 export interface NbaStatus { status: "snoozed" | "dismissed" | "done"; at: number; until?: number }
 export interface Sherpa {
-  accounts: Account[]; assets: Asset[]; tenders: Tender[]; opps: Opp[]; past: Past[]; offers: Offer[]; mleads: MLead[]; campaigns: Campaign[]; tasks: Task[];
+  accounts: Account[]; assets: Asset[]; tenders: Tender[]; opps: Opp[]; past: Past[]; offers: Offer[]; mleads: MLead[]; campaigns: Campaign[]; tasks: Task[]; contracts: Contract[];
   crm: { t: number; by: string; text: string }[]; nba: Record<string, NbaStatus>; flags: { coaching: boolean }; seq: number;
 }

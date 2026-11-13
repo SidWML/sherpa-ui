@@ -46,14 +46,18 @@ export const PLACES: Place[] = [
 
 export const USERS: User[] = [
   { id: "alex", name: "Arjun Rao", role: "reporter", title: "Lead generator · Hyderabad", initials: "AR", blurb: "Not a seller. Snaps a lift or building, answers a few quick questions and follows the lead until a seller wins it. This is the standalone Snap & Lead app." },
-  { id: "tom", hidden: true, name: "Tarun Reddy", role: "reporter", title: "Field technician · Hyderabad", initials: "TR", blurb: "Second reporter. Used for duplicate-report scenarios." },
+  { id: "tom", hidden: true, name: "Tarun Reddy", role: "reporter", title: "Field technician · Hyderabad", initials: "TR", blurb: "Snaps lifts on service visits. Has NewCRM access and can ask AI about a lead from its details." },
   { id: "noah", name: "Naveen Chowdary", role: "ni", team: "NI", areas: ["HYW", "HYC", "SEC"], title: "NI sales rep · new installations", initials: "NC", blurb: "Tenders, building sites and quotes. Next best actions: matched tender, EORD near, quote idle, competitor spec. No NI rep covers Warangal (exception demo)." },
   { id: "ethan", name: "Eshwar Varma", role: "ei", team: "EI", areas: ["HYW", "WGL"], title: "EI / REP sales rep · existing installations", initials: "EV", blurb: "Keeps and grows the installed base: callbacks, renewals at risk, competitor-serviced lifts from Snap & Lead." },
   { id: "elias", name: "Imran Baig", role: "ei", team: "EI", areas: ["HYC", "SEC"], title: "EI / REP sales rep · Hyderabad Central and Secunderabad", initials: "IB", blurb: "Second EI rep. Shows area-based routing and handed-over units." },
   { id: "sofia", name: "Sunita Murthy", role: "sc", team: "SC", areas: ["HYW", "HYC", "SEC", "WGL"], title: "SC sales rep · service contracts", initials: "SM", blurb: "Sells and renews service contracts. Contract ending, contract changed in offer, EORD." },
   { id: "mia", name: "Meera Krishnan", role: "mod", team: "MOD", areas: ["HYW", "HYC", "SEC"], title: "MOD sales rep · modernisation", initials: "MK", blurb: "Turns ageing units into projects: frequent faults, obsolete parts, open MOD offers." },
   { id: "marc", name: "Madhav Reddy", role: "mgr", team: "MGR", areas: ["HYW", "HYC", "SEC", "WGL"], title: "Sales manager · Telangana", initials: "MR", blurb: "Steers the team: stalled deals, discount approvals, leads not followed up. Team-level only." },
+  { id: "teja", name: "Teja Goud", role: "tech", areas: ["HYW", "HYC"], title: "Field technician · Hyderabad West and Central", initials: "TG", blurb: "Visits the sites the Sales Manager qualifies. Meets the person in charge, checks the lifts and files the site-visit report." },
+  { id: "anil", name: "Anil Kumar", role: "tech", areas: ["SEC", "WGL"], title: "Field technician · Secunderabad and Warangal", initials: "AK", blurb: "Second field technician. Covers Secunderabad and Warangal site visits." },
   { id: "shalini", name: "Shalini Nair", role: "ss", title: "Sales support · quotes, orders and changes", initials: "SN", blurb: "Unblocks quotes: missing data, blocked approvals. Completes configurations." },
+  { id: "srikanth", name: "Srikanth Naidu", role: "sl", areas: ["HYW", "HYC"], title: "Service lead · Hyderabad West and Central", initials: "SN", blurb: "Takes over won new installations in Hyderabad West and Central. Reads the handover pack and accepts the job with a start date and a site contact." },
+  { id: "farhan", name: "Farhan Ali", role: "sl", areas: ["SEC", "WGL"], title: "Service lead · Secunderabad and Warangal", initials: "FA", blurb: "Service lead for Secunderabad and Warangal. Accepts won installation jobs." },
   { id: "lena", name: "Lakshmi Prasad", role: "am", team: "AM", title: "Account manager · key accounts", initials: "LP", blurb: "One view of each key account across NI, EI, MOD and branches. Silent accounts, cross-sell." },
   { id: "manoj", name: "Manoj Verma", role: "mkt", title: "Marketing · campaigns and leads", initials: "MV", blurb: "Builds audiences, drafts campaigns, chases leads nobody followed up in 48 hours." },
   { id: "priya", hidden: true, name: "Priya Sharma", role: "rs", team: "RS", title: "Records steward", initials: "PS", blurb: "Mismatched, missing and duplicate lifts. Side-by-side review." },
@@ -73,7 +77,7 @@ export const APPS: Record<AppId, { name: string; home: string; users: User[] }> 
 export const ROLE_LABEL: Record<Role, string> = {
   reporter: "Lead generator", sc: "SC sales rep", ei: "EI / REP sales rep", mod: "MOD sales rep",
   ni: "NI sales rep", am: "Account manager", mgr: "Sales manager", rs: "Records steward",
-  ed: "Emergency desk", svc: "Service team", lead: "Regional lead", admin: "Administrator", ss: "Sales support", mkt: "Marketing",
+  ed: "Emergency desk", svc: "Service team", lead: "Regional lead", admin: "Administrator", ss: "Sales support", mkt: "Marketing", tech: "Field technician", sl: "Service lead",
 };
 
 export const DEFAULT_CFG: Config = {
@@ -82,6 +86,7 @@ export const DEFAULT_CFG: Config = {
   base: { ourOther: 60, site: 60, ended: 55, ourMissingProblem: 45, keyCustomer: 45, ourProblem: 40, otherLocal: 40, veryOld: 35, otherMaker: 20 },
   followUp: { hot: [24, 48, 72], warm: [72, 120, 240] },
   dailyLimit: 5,
+  approveAll: false,
   owners: {
     HYW: { SC: "sofia", EI: "ethan", MOD: "mia", NI: "noah", AM: "lena", MGR: "marc" },
     HYC: { SC: "sofia", EI: "elias", MOD: "mia", NI: "noah", AM: "lena", MGR: "marc" },
@@ -93,7 +98,7 @@ export const DEFAULT_CFG: Config = {
 export const GLOBAL_OWNER: Partial<Record<Team, string>> = { RS: "priya", ED: "dimitri", SVC: "jonas" };
 
 export const LEVELS = [
-  { name: "Spotter", from: 0 }, { name: "Scout", from: 100 }, { name: "Pathfinder", from: 300 }, { name: "Champion", from: 700 },
+  { name: "Spotter", from: 0 }, { name: "Scout", from: 100 }, { name: "Pathfinder", from: 300 }, { name: "Champion", from: 700 }, { name: "Legend", from: 1500 },
 ];
 
 /* ---------- Case catalogue: all 145 cases. [id, title, pilot] ---------- */
@@ -290,16 +295,16 @@ export const DESK_HINTS: Record<string, string> = {
 
 export const roleHome: Record<Role, string> = {
   reporter: "home", sc: "leads", ei: "leads", mod: "leads", ni: "leads", am: "accounts", mgr: "exceptions",
-  rs: "queue", ed: "inbox", svc: "tickets", lead: "dashboard", admin: "rules", ss: "today", mkt: "today",
+  rs: "queue", ed: "inbox", svc: "tickets", lead: "dashboard", admin: "rules", ss: "today", mkt: "today", tech: "visits", sl: "jobs",
 };
 
 /** Other lead generators in the region, for the leaderboard. Demo figures: confirmed points, leads sent and wins. */
 export const LEAD_PEERS = [
-  { id: "p-kiran", name: "Kiran Kumar", initials: "KK", area: "Secunderabad", pts: 620, leads: 21, won: 2 },
-  { id: "p-ayesha", name: "Ayesha Khan", initials: "AK", area: "Gachibowli", pts: 480, leads: 17, won: 1 },
-  { id: "p-ravi", name: "Ravi Teja", initials: "RT", area: "Kukatpally", pts: 410, leads: 15, won: 1 },
-  { id: "p-sneha", name: "Sneha Patel", initials: "SP", area: "Banjara Hills", pts: 290, leads: 12, won: 0 },
-  { id: "p-vikram", name: "Vikram Singh", initials: "VS", area: "Madhapur", pts: 240, leads: 10, won: 0 },
-  { id: "p-deepa", name: "Deepa Iyer", initials: "DI", area: "Warangal", pts: 180, leads: 7, won: 0 },
-  { id: "p-rahul", name: "Rahul Menon", initials: "RM", area: "Begumpet", pts: 120, leads: 5, won: 0 },
+  { id: "p-kiran", name: "Kiran Kumar", initials: "KK", area: "Secunderabad", pts: 1920, leads: 58, won: 6 },
+  { id: "p-ayesha", name: "Ayesha Khan", initials: "AK", area: "Gachibowli", pts: 1680, leads: 51, won: 5 },
+  { id: "p-ravi", name: "Ravi Teja", initials: "RT", area: "Kukatpally", pts: 1410, leads: 44, won: 4 },
+  { id: "p-sneha", name: "Sneha Patel", initials: "SP", area: "Banjara Hills", pts: 1050, leads: 36, won: 2 },
+  { id: "p-vikram", name: "Vikram Singh", initials: "VS", area: "Madhapur", pts: 870, leads: 30, won: 2 },
+  { id: "p-deepa", name: "Deepa Iyer", initials: "DI", area: "Warangal", pts: 560, leads: 19, won: 1 },
+  { id: "p-rahul", name: "Rahul Menon", initials: "RM", area: "Begumpet", pts: 310, leads: 11, won: 0 },
 ];

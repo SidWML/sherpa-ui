@@ -1,18 +1,17 @@
 "use client";
-import { useState } from "react";
+import { Choice } from "@/components/form";
 import { useApp } from "@/lib/store";
 import { AGENTS, AREA_NAME, CATALOG, DAY, HOUR, NAMES, SH, accountOf, daysTo, inr, type NbaCard } from "@/lib/sherpa";
-import { Btn, Card, Empty, Icon, Pill } from "../ui";
+import { Btn, Card, Empty, Pill } from "../ui";
 import { Page } from "./Common";
 import { Stat, StatGrid } from "./Dash";
 import { OfferPill } from "./Offers";
+import { Why } from "../Why";
+import { unitHealth } from "@/lib/scores";
 
 export type Ask = (prompt: string, ctx?: Partial<NbaCard>) => void;
 
 const healthTone = (h: number) => (h < 45 ? "red" : h < 70 ? "amber" : "green") as "red" | "amber" | "green";
-const Tabs = ({ items, value, set }: { items: [string, string][]; value: string; set: (v: string) => void }) => (
-  <div className="mb-4 flex gap-1.5">{items.map(([k, l]) => <button key={k} onClick={() => set(k)} className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${value === k ? "bg-ink text-white" : "bg-white text-ink/80 ring-1 ring-line hover:bg-surface"}`}>{l}</button>)}</div>
-);
 
 /* ------------------------------------------------------------------ portfolio: my units */
 export function Portfolio({ onAsk }: { onAsk: Ask }) {
@@ -33,7 +32,7 @@ export function Portfolio({ onAsk }: { onAsk: Ask }) {
           const acc = accountOf(s, a.accountId);
           return (
             <Card key={a.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
-              <div className="min-w-0 flex-1 basis-[16rem]"><div className="flex flex-wrap items-center gap-1.5"><Pill tone={healthTone(a.health)}>Health {a.health}</Pill>{acc?.key && <Pill tone="amber">Key account</Pill>}{a.handedOver && <Pill tone="blue">New unit</Pill>}</div>
+              <div className="min-w-0 flex-1 basis-[16rem]"><div className="flex flex-wrap items-center gap-1.5"><Why title="Lift health" e={unitHealth(a)}><Pill tone={healthTone(a.health)}>Health {a.health}</Pill></Why>{acc?.key && <Pill tone="amber">Key account</Pill>}{a.handedOver && <Pill tone="blue">New unit</Pill>}</div>
                 <div className="mt-1.5 text-[15px] font-semibold">{acc?.name}</div><div className="text-[12.5px] text-muted">{a.label} · {a.ageYears ? `${a.ageYears} yrs` : "new"} · {a.contractEnd ? `contract ends in ${daysTo(s, a.contractEnd)} days` : "no contract"} · {a.callbacks90d} callbacks in 90 days</div></div>
               <div className="flex gap-2"><Btn sm v="ghost" onClick={() => onAsk(`Brief me on lift ${a.id.slice(1)}`, { assetId: a.id, accountId: a.accountId })}>Brief me</Btn><Btn sm onClick={() => onAsk(a.contractEnd ? `Draft the renewal for lift ${a.id.slice(1)}` : `Draft a maintenance offer for lift ${a.id.slice(1)}`, { assetId: a.id, accountId: a.accountId })}>{a.contractEnd ? "Draft renewal" : "Offer maintenance"}</Btn></div>
             </Card>
@@ -62,7 +61,7 @@ export function Tenders({ onAsk }: { onAsk: Ask }) {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{t.id}</span><Pill tone={t.stage === "matched" ? "blue" : t.stage === "final" ? "green" : "gray"}>{t.stage === "final" ? "Final bidding" : t.stage}</Pill>{t.competitorSpec && <Pill tone="amber">Competitor spec</Pill>}{t.lossNote && <Pill tone="red">Lost here before</Pill>}</div>
                   <div className="mt-1.5 text-[15px] font-semibold">{t.name}</div><div className="text-[12.5px] text-muted">{accountOf(s, t.accountId)?.name} · {AREA_NAME[t.area]} · {inr(t.value)} · order date in {left} days ({NAMES[t.owner]})</div></div>
-                <select value={t.stage} onChange={(e) => mutate((st) => SH.apply(st, me!.id, { t: "tenderStage", id: t.id, stage: e.target.value as typeof t.stage }))} className="min-h-9 rounded-lg border border-line bg-white px-2 text-[13px]">{[...STAGES, "won", "lost"].map((x) => <option key={x} value={x}>{x === "final" ? "final bidding" : x}</option>)}</select>
+                <Choice value={t.stage} onChange={(v) => mutate((st) => SH.apply(st, me!.id, { t: "tenderStage", id: t.id, stage: v as typeof t.stage }))} size="sm" className="w-auto" aria-label="Tender stage" options={[...STAGES, "won", "lost"].map((x) => ({ value: x, label: x === "final" ? "final bidding" : x }))} />
               </div>
               <div className="mt-3 flex flex-wrap gap-2"><Btn sm v="ghost" onClick={() => onAsk(`Summarize ${t.id}`, { tenderId: t.id, accountId: t.accountId })}>Summarize</Btn><Btn sm v="ghost" onClick={() => onAsk(`Open the bid checklist for ${t.id}`, { tenderId: t.id, accountId: t.accountId })}>Bid checklist</Btn>{t.competitorSpec && <Btn sm v="ghost" onClick={() => onAsk(`Prepare the counter-argument for ${t.id}`, { tenderId: t.id })}>Counter-argument</Btn>}{t.line === "ni" && <Btn sm onClick={() => onAsk(`Draft the offer for ${t.id}`, { tenderId: t.id, accountId: t.accountId })}>Draft the offer</Btn>}</div>
             </Card>
@@ -89,31 +88,12 @@ export function Support({ onAsk, openOffer }: { onAsk: Ask; openOffer: (id: stri
   );
 }
 
-/* ------------------------------------------------------------------ marketing */
-export function Campaigns({ onAsk }: { onAsk: Ask }) {
-  const { s, me, mutate, now } = useApp();
-  const [tab, setTab] = useState("leads");
-  const owner = (area: string) => (area === "HYW" ? "ethan" : "elias");
-  return (
-    <Page title="Campaigns and leads" sub="Build audiences from the installed base, send campaigns, and make sure no lead goes cold." >
-      <StatGrid><Stat label="Live campaigns" value={s.sherpa.campaigns.filter((c) => c.status === "live").length} icon="send" /><Stat label="Leads from campaigns" value={s.sherpa.mleads.length} icon="list" /><Stat label="Waiting over 48h" value={s.sherpa.mleads.filter((l) => l.status === "new" && now - l.createdAt > 48 * HOUR).length} tone="red" icon="clock" /><Stat label="Converted" value={s.sherpa.mleads.filter((l) => l.status === "converted").length} tone="green" icon="trophy" /></StatGrid>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><Tabs value={tab} set={setTab} items={[["leads", "Leads"], ["camp", "Campaigns"]]} /><Btn sm onClick={() => onAsk("Build an audience for Hyderabad Central ageing lifts")}><Icon n="plus" s={14} /> Build an audience</Btn></div>
-      {tab === "leads" ? (
-        <div className="space-y-2.5">{s.sherpa.mleads.map((l) => { const h = Math.round((now - l.createdAt) / HOUR); return (
-          <Card key={l.id} className="flex flex-wrap items-center gap-3 p-4"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{l.id}</span><Pill tone={l.status === "new" ? (h > 48 ? "red" : "amber") : "green"}>{l.status === "new" ? `Waiting ${h} h` : l.status}</Pill><Pill>Score {l.score}</Pill></div><div className="mt-1 text-[15px] font-semibold">{l.name}</div><div className="text-[12.5px] text-muted">{l.interest} · {l.source} · {AREA_NAME[l.area]} · owner {l.owner ? NAMES[l.owner] : "none"}</div></div>
-            {!l.owner && l.status === "new" && <Btn sm onClick={() => mutate((st) => SH.apply(st, me!.id, { t: "assign", mleadId: l.id, to: owner(l.area) }))}>Assign to {NAMES[owner(l.area)].split(" ")[0]}</Btn>}</Card>); })}</div>
-      ) : (
-        <div className="space-y-2.5">{s.sherpa.campaigns.map((c) => <Card key={c.id} className="p-4"><div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{c.id}</span><Pill tone={c.status === "live" ? "green" : "gray"}>{c.status}</Pill></div><div className="mt-1 text-[15px] font-semibold">{c.name}</div><div className="text-[12.5px] text-muted">{c.segment} · {c.size} contacts · {c.leads} leads · created by {NAMES[c.createdBy]}</div>{c.message && <div className="mt-2 rounded-xl bg-surface p-3 text-[12.5px]"><b>{c.message.subject}</b></div>}</Card>)}</div>
-      )}
-    </Page>
-  );
-}
-
 /* ------------------------------------------------------------------ manager: team */
 export function TeamPipeline({ onAsk, openOffer }: { onAsk: Ask; openOffer: (id: string) => void }) {
   const { s, now } = useApp();
-  const stalled = s.sherpa.offers.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY);
-  const open = s.sherpa.offers.filter((o) => ["draft", "awaiting", "changes", "approved", "sent"].includes(o.status));
+  const offers = [...s.sherpa.offers].sort((a, b) => b.lastActivity - a.lastActivity);
+  const stalled = offers.filter((o) => o.status === "sent" && now - o.lastActivity >= 21 * DAY);
+  const open = offers.filter((o) => ["draft", "awaiting", "changes", "approved", "sent"].includes(o.status));
   const won = s.sherpa.offers.filter((o) => o.status === "won");
   const byArea = Object.keys(AREA_NAME).filter((a) => a !== "OUT").map((a) => ({ a, n: open.filter((o) => o.area === a).length, v: open.filter((o) => o.area === a).reduce((t, o) => t + o.price, 0) }));
   return (

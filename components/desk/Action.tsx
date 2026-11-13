@@ -4,6 +4,7 @@ import { A, effTier, stepsOf, useApp } from "@/lib/store";
 import { OPENING } from "@/lib/engine";
 import type { Item, Report, Role, State } from "@/lib/types";
 import { Btn, Card, Icon } from "../ui";
+import { Choice, Input, Textarea } from "@/components/form";
 
 export const DECLINE = ["Wrong area", "Not our product", "Duplicate", "Already in progress", "Other"];
 export const NOT_REL = ["Customer not interested", "Already served by us", "Not a real opportunity", "Other"];
@@ -153,13 +154,13 @@ export function NbaCard({ r, it, role }: { r: Report; it: Item; role: Role }) {
           )}
           {form && nba?.form && (
             <div className="pop mt-4 space-y-2 rounded-xl border border-line p-3">
-              {nba.form.options && <select value={opt} onChange={(e) => setOpt(e.target.value)} className="min-h-10 w-full rounded-lg border border-line bg-white px-3 text-sm">{nba.form.options.map((o) => <option key={o}>{o}</option>)}</select>}
-              <textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={nba.form.placeholder} className="min-h-20 w-full rounded-lg border border-line p-3 text-sm outline-none focus:border-brand" />
+              {nba.form.options && <Choice value={opt} onChange={setOpt} options={nba.form.options} />}
+              <Textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={nba.form.placeholder} />
               <div className="flex gap-2"><Btn onClick={() => go(opt, note.trim())}>{nba.form.cta}</Btn><Btn v="ghost" onClick={() => setForm(false)}>Cancel</Btn><span className="self-center text-xs text-muted">The note is optional.</span></div>
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {nba?.options && <select value={opt || nba.options[0]} onChange={(e) => setOpt(e.target.value)} className="min-h-11 rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-brand">{nba.options.map((o) => <option key={o}>{o}</option>)}</select>}
+            {nba?.options && <Choice value={opt || nba.options[0]} onChange={setOpt} options={nba.options} className="h-11 w-auto min-w-40" />}
             {nba && !form && <Btn onClick={() => { if (nba.form) { setForm(true); setOpt(nba.form.options?.[0] ?? ""); return; } go(opt || nba.options?.[0]); }}>{nba.cta}</Btn>}
             {more.length > 0 && (
               <div className="relative">
@@ -185,8 +186,8 @@ export function NbaCard({ r, it, role }: { r: Report; it: Item; role: Role }) {
           <div onClick={(e) => e.stopPropagation()} className="pop w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
             <div className="text-base font-semibold">{dlg.ask.title}</div>
             <div className="mt-3">
-              {dlg.ask.options ? <select value={val} onChange={(e) => setVal(e.target.value)} className="min-h-11 w-full rounded-xl border border-line px-3 text-sm">{dlg.ask.options.map((o) => <option key={o}>{o}</option>)}</select>
-                : <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder={dlg.ask.text} className="min-h-11 w-full rounded-xl border border-line px-3 text-sm outline-none focus:border-brand" />}
+              {dlg.ask.options ? <Choice value={val} onChange={setVal} options={dlg.ask.options} />
+                : <Input autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder={dlg.ask.text} />}
             </div>
             <div className="mt-4 flex justify-end gap-2"><Btn v="ghost" onClick={() => setDlg(null)}>Cancel</Btn><Btn disabled={!val} onClick={() => { const a = dlg.ask!; mutate((st) => a.apply(st, by, val)); setDlg(null); }}>{dlg.ask.cta}</Btn></div>
           </div>

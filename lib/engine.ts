@@ -45,7 +45,17 @@ function mods(i: Input, mode: "unit" | "site" | "mod", ours: boolean): Reason[] 
     if (i.condition === "out") m.push({ label: "Out of service", pts: 20 });
     if (ours && i.breakdowns >= 4) m.push({ label: "Four or more breakdown calls in 90 days", pts: 10 });
     if (!ours && i.age >= 20) m.push({ label: "Another company's lift about 20 years or older", pts: 10 });
+    if (i.reason === "complaint") m.push({ label: "Someone complained about it", pts: 10 });
+    if (i.reasonDetail === "unhappy") m.push({ label: "Customer unhappy with our service", pts: 10 });
+    if (i.reasonDetail === "quote") m.push({ label: "Customer asked for a quote", pts: 15 });
+    if (!ours) {
+      if (i.inCharge === "fm" || i.inCharge === "owner") m.push({ label: i.inCharge === "fm" ? "Facility manager known" : "Building owner known", pts: 5 });
+      if (i.ownerTalk === "open") m.push({ label: "Person in charge is open to a call", pts: 15 });
+      if (i.ownerTalk === "no") m.push({ label: "Person in charge was not interested", pts: -10 });
+      if (i.servicerMood === "unhappy") m.push({ label: "Unhappy with the current servicer", pts: 15 });
+    }
   }
+  if (mode === "mod" && i.reason === "old") m.push({ label: "Reporter says it looks old or worn", pts: 5 });
   if (mode === "site") {
     if (i.stage === "early") m.push({ label: "Building-site stage: early", pts: 15 });
     if (i.stage === "structure") m.push({ label: "Building-site stage: structure going up", pts: 10 });
@@ -225,9 +235,13 @@ export function evaluate(i: Input, cfg: Config): Outcome {
           tag("B4");
           lead("EI", "noted", cfg.base.ourProblem, "Customer at risk: repeated breakdowns", "unit", "B4", "Customer at risk", "Four or more breakdown calls in 90 days. Plan a retention visit.", { also: ["MGR"], silent: true, flags: ["Customer at risk"] });
           add({ kind: "note", team: null, track: "noted", caseId: tag("B1"), title: "Noted", summary: "Running fine on the day.", autoClose: "Noted" });
+        } else if (i.reason === "contract") {
+          lead("SC", "renewal", cfg.base.ended, "Contract question heard on site", "unit", "B6", "Contract follow-up", `Contract question at the site${i.reasonDetail === "ending" ? ": the customer thinks it ends soon" : i.reasonDetail === "unhappy" ? ": the customer is unhappy with the service" : i.reasonDetail === "quote" ? ": the customer wants a quote" : ""}.`);
+        } else if (i.reason === "complaint") {
+          lead("EI", "sales", cfg.base.ourProblem, "Complaint about our lift, running fine on the day", "unit", "B4", "Customer at risk", "Someone complained about this lift. Plan a retention call.", { flags: ["Customer at risk"] });
         } else note("B1", "Noted", "Lift is ours, in records, contract active, running fine. Nothing to do.");
         if (i.keyCustomer) tag("B19");
-        if (old && faulty) lead("MOD", "modernisation", cfg.base.veryOld, "Very old lift (modernisation lead)", "mod", "B12", "Modernisation lead", "Lift is 20 years or older and faulty.");
+        if ((old && faulty) || (i.reason === "old" && i.age >= 15)) lead("MOD", "modernisation", cfg.base.veryOld, "Very old lift (modernisation lead)", "mod", "B12", "Modernisation lead", old && faulty ? "Lift is 20 years or older and faulty." : "The reporter says it looks old or worn.");
         pts("sent", "Report sent", 10);
       }
     } else {

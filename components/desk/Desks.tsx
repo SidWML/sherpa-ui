@@ -1,56 +1,73 @@
 "use client";
+import { SnapSheet } from "./SnapSheet";
 import { useMemo, useState } from "react";
 import { A, H, effTier, exceptions, itemsFor, nowOf, stepsOf, useApp, userOf } from "@/lib/store";
 import { AREAS, GROUPS, PLACES, ROLE_LABEL, TEAM_NAME, TRACKS, USERS } from "@/lib/data";
 import type { Item, Report, Role, Team, Tier } from "@/lib/types";
 import { TerritoryMap } from "../hub/TerritoryMap";
 import { BidPage } from "./Bid";
+import { LeadReview } from "./LeadReview";
 import { Shell, type NavItem } from "../Shell";
 import { Frame } from "../Frame";
-import { Alerts } from "../shared";
+import { Alerts, Drawer } from "../shared";
 import { Btn, Card, Empty, Field, Icon, PhotoTile, Pill, Section, TierPill, ago } from "../ui";
 import { ClockBadge, ItemPanel, Kpi, Page, Sel, StatusPill } from "./Common";
 import { Back, Label, NbaCard, nbaFor } from "./Action";
-import { AgentRegistry, Campaigns, Catalogue, CrmLog, Portfolio, TeamPipeline, type Ask } from "./Work";
+import { AgentRegistry, Catalogue, CrmLog, Portfolio, TeamPipeline, type Ask } from "./Work";
 import { OfferPage } from "./Offers";
+import { OppPage } from "./Opps";
+import { ContractPage, Contracts } from "./Contract";
+import { Accounts } from "./Accounts";
+import { Marketing } from "./Marketing";
 import { ChatHome, MyWork } from "../hub/Hub";
 import type { Seed } from "./Sherpa";
 import type { NbaCard as NbaItem } from "@/lib/sherpa";
 import { Bars, QuickActions } from "./Dash";
-import { AccountOverview, AdminOverview, EmergencyOverview, ManagerOverview, RecordsOverview, SalesOverview, ServiceOverview } from "./Dash";
+import { AdminOverview, EmergencyOverview, ManagerOverview, RecordsOverview, SalesOverview, ServiceOverview } from "./Dash";
+import { Input } from "@/components/form";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Row = { r: Report; it: Item };
 
-const SELLER_ROLES = ["ni", "ei", "sc", "mod", "ss", "am", "mkt", "mgr"];
+const SELLER_ROLES = ["ni", "ei", "sc", "mod", "ss", "am", "mkt", "mgr", "tech", "sl"];
 
 export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boolean }) {
   const { s, me } = useApp();
   const role = me!.role;
   const sherpa = SELLER_ROLES.includes(role);
-  const [view, setView] = useState(sherpa ? "work" : "rules");
+  const [view, setView] = useState(role === "mgr" ? "review" : role === "mkt" ? "campaigns" : sherpa ? "work" : "rules");
   const [seed, setSeed] = useState<Seed | null>(null);
   const [oppId, setOppId] = useState<string | null>(null);
-  const [offerId, setOfferId] = useState<string | null>(null); const [bidId, setBidId] = useState<string | null>(null);
-  const [wide, setWide] = useState(false);
+  const [stack, setStack] = useState<string[]>([]);
+  const push = (id: string) => setStack((x) => [...x.filter((y) => y !== id), id]);
+  const [wide, setWide] = useState(false); const [snap, setSnap] = useState(false);
   const unread = s.alerts.filter((a) => a.userId === me!.id && !a.read).length;
   const mine = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id).length;
   const N = (id: string, label: string, icon: string, badge?: number, narrowOnly?: boolean): NavItem => ({ id, label, icon, badge: badge || undefined, narrowOnly });
-  const front = sherpa ? [N("work", "My work", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)] : [];
+  const reviewing = s.sherpa.opps.filter((o) => o.stage === "review").length;
+  const front = role === "tech" ? [N("work", "My visits", "pin", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)]
+    : role === "sl" ? [N("work", "My jobs", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)]
+    : sherpa ? [...(role === "mgr" ? [N("review", "Lead review", "flag", reviewing)] : []), N("work", "My work", "list", mine), N("map", "Map", "map"), N("chat", "Chat", "sparkle", undefined, true)] : [];
+  const planned = s.sherpa.tasks.filter((t) => !t.done && t.forUser === me!.id && t.kind === "accountAction" && !t.oppId).length;
+  const checks = s.sherpa.contracts.filter((c) => (role === "ss" && c.status === "check") || (role === "mgr" && c.status === "approval")).length;
+  const accounts = (label: string) => N("accounts", label, "users", planned);
+  const contracts = N("contracts", "Contracts", "doc", checks);
   const byRole: Record<string, NavItem[]> = {
-    ni: [], ei: [N("portfolio", "Portfolio", "layers")], sc: [N("portfolio", "Portfolio", "layers")], mod: [N("portfolio", "Portfolio", "layers")], ss: [],
-    am: [N("accounts", "Key accounts", "users"), N("portfolio", "Portfolio", "layers")], mkt: [N("campaigns", "Campaigns and leads", "send")],
-    mgr: [N("team", "Team pipeline", "chart")],
+    ni: [accounts("My accounts")], ei: [accounts("My accounts"), N("portfolio", "Portfolio", "layers")], sc: [accounts("My accounts"), N("portfolio", "Portfolio", "layers")], mod: [accounts("My accounts"), N("portfolio", "Portfolio", "layers")], ss: [contracts],
+    am: [accounts("Accounts"), contracts, N("portfolio", "Portfolio", "layers")], mkt: [N("campaigns", "Marketing", "send", s.sherpa.mleads.filter((l) => l.status === "new").length)],
+    mgr: [N("team", "Team pipeline", "chart"), accounts("Accounts"), contracts],
     admin: [N("rules", "Rules and routing", "gear"), N("nba", "NBA catalogue", "sparkle"), N("agents", "Agent registry", "bolt"), N("crmlog", "NewCRM write-backs", "doc"), N("audit", "Audit log", "list"), N("users", "Users and areas", "users")],
   };
   const nav: NavItem[] = [...front, ...(byRole[role] ?? []), { ...N("alerts", "Alerts", "bell", unread), inBell: true }];
 
-  const openOpp = (id: string) => { setOppId(id); setView("work"); };
-  /** An id that starts with T- is a tender: it opens the bid builder. */
-  const openOffer = (id: string) => { if (id.startsWith("T-")) { setBidId(id); setView("bid"); } else { setOfferId(id); setView("offer"); } };
+  const openOpp = (id: string) => { if (view === "work" && !stack.length) setOppId(id); else push(id); };
+  const openOffer = push;
   const startAsk = (card: NbaItem) => { setSeed({ id: Date.now(), card }); if (!wide) setView("chat"); };
   const ask: Ask = (prompt, c) => startAsk({ key: "ASK:" + Date.now(), no: 0, title: "", why: "", sources: [], urgency: "low", agent: "", cta: "", prompt, kind: "doc", ...c });
-  const offer = s.sherpa.offers.find((o) => o.id === offerId);
+  const openSnapLead = (rid: string) => { const o = s.sherpa.opps.find((x) => x.source?.type === "snap" && x.source.reportId === rid); setSnap(false); if (o) openOpp(o.id); };
   const goTo = (v: string) => {
+    if (v === "snap") return setSnap(true);
     if (v.startsWith("work:")) return openOpp(v.slice(5));
     if (v === "work" || v === "opps" || v === "offers") setOppId(null);
     const d = v === "today" || v === "me" || v === "home" ? "work" : v === "ask" ? "chat" : v === "opps" || v === "offers" ? "work" : v;
@@ -62,14 +79,14 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
     return (
       <>
         {!w && sherpa && <div className={v === "chat" ? "absolute inset-0" : "hidden"}><ChatHome seed={seed} openOpp={openOpp} openOffer={openOffer} go={goTo} /></div>}
+        {v === "review" && <LeadReview openOffer={openOffer} />}
         {v === "work" && <MyWork openId={oppId} setOpenId={setOppId} openOffer={openOffer} onAsk={(o) => ask(`Where is ${o.id} (${o.placeName})?`)} />}
         {v === "map" && <TerritoryMap onOpenOpp={openOpp} onAsk={(p) => ask(p)} />}
-        {v === "bid" && bidId && <BidPage id={bidId} onBack={() => { const op = s.sherpa.tenders.find((x) => x.id === bidId)?.oppId; if (op) setOppId(op); setView("work"); }} openOpp={openOpp} />}
-        {v === "offer" && offerId && <OfferPage id={offerId} onBack={() => { if (offer?.oppId) setOppId(offer.oppId); setView("work"); }} />}
         {v === "portfolio" && <Portfolio onAsk={ask} />}
-        {v === "campaigns" && <Campaigns onAsk={ask} />}
+        {v === "campaigns" && <Marketing openOpp={openOpp} />}
+        {v === "contracts" && <Contracts openOffer={openOffer} />}
         {v === "team" && <TeamPipeline onAsk={ask} openOffer={openOffer} />}
-        {v === "accounts" && <AccountDesk />}
+        {v === "accounts" && <Accounts openOpp={openOpp} openOffer={openOffer} />}
         {v === "nba" && <Catalogue />}
         {v === "agents" && <AgentRegistry />}
         {v === "crmlog" && <CrmLog />}
@@ -80,15 +97,16 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
       </>
     );
   };
-  const tabView = view === "offer" || view === "bid" ? "work" : view;
-  const setTab = (v: string) => { if (v === "work") setOppId(null); setView(v); };
+  const tabView = view;
+  const setTab = (v: string) => { if (v === "work") setOppId(null); setStack([]); setView(v); };
   if (sherpa) return (
     <Frame framed={framed} agent="SHERPA" tabs={nav} view={wide && tabView === "chat" ? "work" : tabView} setView={setTab} onDemo={onDemo} onWide={setWide} xp={false}
+      actions={<button onClick={() => setSnap(true)} aria-label="Snap a lead" title="Snap a lift you spotted" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line px-2 text-[12.5px] font-medium hover:bg-surface @xl:px-2.5"><Icon n="camera" s={15} /><span className="hidden @xl:inline">Snap a lead</span></button>}
       side={<>
         <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-line px-4"><span className="grid h-7 w-7 place-items-center rounded-md bg-brand text-white"><Icon n="sparkle" s={15} /></span><div><div className="text-[14px] font-semibold leading-tight">SHERPA</div><div className="t-small leading-tight">Ask anything or act on a lead</div></div></div>
         <div className="relative min-h-0 flex-1"><ChatHome compact seed={seed} openOpp={openOpp} openOffer={openOffer} go={goTo} /></div>
       </>}>
-      {body}
+      {(w) => <>{body(w)}{stack.length > 0 && <DetailDrawer key={stack[stack.length - 1]} id={stack[stack.length - 1]} onClose={() => setStack((x) => x.slice(0, -1))} openOpp={push} openOffer={push} />}<SnapSheet open={snap} onClose={() => setSnap(false)} onOpenLead={openSnapLead} /></>}
     </Frame>
   );
   return (
@@ -96,6 +114,15 @@ export function DeskApp({ onDemo, framed }: { onDemo: () => void; framed?: boole
       {body(false)}
     </Shell>
   );
+}
+
+function DetailDrawer({ id, onClose, openOpp, openOffer }: { id: string; onClose: () => void; openOpp: (id: string) => void; openOffer: (id: string) => void }) {
+  const { s } = useApp();
+  if (id.startsWith("OP-")) { const o = s.sherpa.opps.find((x) => x.id === id); return <Drawer top label={`Opportunity · ${id}`} title={o?.title ?? id} onClose={onClose}><OppPage embedded id={id} onBack={onClose} openOffer={openOffer} /></Drawer>; }
+  if (id.startsWith("T-")) { const t = s.sherpa.tenders.find((x) => x.id === id); return <Drawer wide top label={`Bid · ${id}`} title={t ? `Bid for ${t.name}` : id} onClose={onClose}><BidPage embedded id={id} onBack={onClose} openOpp={openOpp} /></Drawer>; }
+  if (id.startsWith("CT-")) { const c = s.sherpa.contracts.find((x) => x.id === id); return <Drawer wide top label={`Contract · ${id}`} title={c?.title ?? id} onClose={onClose}><ContractPage id={id} openOpp={openOpp} /></Drawer>; }
+  const o = s.sherpa.offers.find((x) => x.id === id);
+  return <Drawer wide top label={`Offer · ${id}`} title={o ? `${s.sherpa.accounts.find((a) => a.id === o.accountId)?.name ?? ""}: ${o.title}` : id} onClose={onClose}><OfferPage embedded id={id} onBack={onClose} /></Drawer>;
 }
 
 function useSel(rows: Row[]) {
@@ -154,36 +181,6 @@ function LeadRow({ r, it, role, onClick }: { r: Report; it: Item; role: Role; on
   );
 }
 
-/* ---------------- Account manager ---------------- */
-function AccountDesk() {
-  const { s, me } = useApp();
-  const mine = itemsFor(s, me!).filter((x) => x.it.team === "AM");
-  const { cur, setId } = useSel(mine);
-  const sites = PLACES.filter((p) => p.key);
-  if (cur) return <ItemPanel r={cur.r} it={cur.it} role="am" onClose={() => setId(null)} />;
-  return (
-    <Page title="Key accounts" sub="All sites of a customer, which teams are active, and the new sighting. You coordinate; the local rep owns the lead.">
-      <AccountOverview />
-      <Section title="New sightings for you">
-        {mine.length === 0 && <Empty text="No key-customer sightings yet. Add one at Tech Park, Tower 2." />}
-        <div className="space-y-2.5">{mine.map(({ r, it }) => <LeadRow key={it.id} r={r} it={it} role="am" onClick={() => setId(it.id)} />)}</div>
-      </Section>
-      <Section title="Key-customer sites">
-        <div className="grid grid-cols-1 gap-3 @4xl:grid-cols-2">
-          {sites.map((p) => {
-            const reps = s.reports.filter((r) => r.placeId === p.id && r.status === "sent");
-            return (
-              <Card key={p.id} className="p-4"><div className="flex items-center justify-between"><div><div className="text-[15px] font-semibold">{p.key}</div><div className="text-xs text-muted">{p.name} · {p.addr}</div></div><Pill tone="amber">Key customer</Pill></div>
-                <div className="mt-3 space-y-1.5">{reps.length === 0 && <div className="text-sm text-muted">No sightings yet.</div>}
-                  {reps.map((r) => <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2 text-sm"><b>{r.id}</b><span className="text-muted">{r.headline}</span><span className="ml-auto flex flex-wrap gap-1">{r.items.filter((x) => x.team && !x.silent).map((x) => <Pill key={x.id} tone={x.status === "closed" ? "green" : "blue"}>{x.team}: {stepsOf(x)[x.step]}</Pill>)}</span></div>)}</div></Card>
-            );
-          })}
-        </div>
-      </Section>
-    </Page>
-  );
-}
-
 /* ---------------- Manager ---------------- */
 function ManagerDesk() {
   const { s, me, mutate } = useApp();
@@ -212,7 +209,7 @@ function ManagerDesk() {
             <div className="space-y-2">{g.map(({ r, it, why, key }) => (
               <Card key={key} className="p-3">
                 <div className="flex flex-wrap items-start gap-3">
-                  {(it.kind === "lead" || it.kind === "ticket") && <input aria-label="Select" type="checkbox" className="mt-1.5 h-4 w-4 accent-[#e3001b]" checked={sel.includes(it.id)} onChange={(e) => setSel(e.target.checked ? [...sel, it.id] : sel.filter((x) => x !== it.id))} />}
+                  {(it.kind === "lead" || it.kind === "ticket") && <Checkbox aria-label="Select" className="mt-1.5" checked={sel.includes(it.id)} onCheckedChange={(v) => setSel(v ? [...sel, it.id] : sel.filter((x) => x !== it.id))} />}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-[11px] font-bold text-muted">{it.caseId}</span>{(it.kind === "lead" || it.kind === "ticket") && <TierPill tier={effTier(it)} />}<Pill tone="amber">{why}</Pill>{it.override && <Pill tone="blue">Overridden to {it.override.to}</Pill>}</div>
                     <div className="text-sm font-bold">{it.title} <span className="font-normal text-muted">· {it.team ? TEAM_NAME[it.team] : ""}</span></div>
@@ -224,7 +221,7 @@ function ManagerDesk() {
                     {it.flags.some((f) => f.startsWith("Invalid")) && <Btn sm v="ghost" onClick={() => mutate((st) => { A.releasePoints(st, r.id, me!.id, true); })}>Confirm valid</Btn>}
                   </div>
                 </div>
-                {ov?.id === it.id && <div className="pop mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface p-2.5"><Sel v={ov.tier} set={(v) => setOv({ ...ov, tier: v as Tier })} options={["Hot", "Warm", "Cold", "Info"]} /><input value={ov.reason} onChange={(e) => setOv({ ...ov, reason: e.target.value })} placeholder="Reason (required)" className="min-h-9 min-w-48 flex-1 rounded-lg border border-line bg-white px-2 text-[13px]" /><Btn sm disabled={!ov.reason} onClick={() => { mutate((st) => A.override(st, it.id, me!.id, ov.tier, ov.reason)); setOv(null); }}>Save override</Btn><Btn sm v="ghost" onClick={() => setOv(null)}>Cancel</Btn></div>}
+                {ov?.id === it.id && <div className="pop mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-surface p-2.5"><Sel v={ov.tier} set={(v) => setOv({ ...ov, tier: v as Tier })} options={["Hot", "Warm", "Cold", "Info"]} /><Input value={ov.reason} onChange={(e) => setOv({ ...ov, reason: e.target.value })} placeholder="Reason (required)" className="h-9 w-auto min-w-48 flex-1" /><Btn sm disabled={!ov.reason} onClick={() => { mutate((st) => A.override(st, it.id, me!.id, ov.tier, ov.reason)); setOv(null); }}>Save override</Btn><Btn sm v="ghost" onClick={() => setOv(null)}>Cancel</Btn></div>}
                 {(it.kind === "lead" || it.kind === "ticket" || it.kind === "records") && <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="text-muted">Reassign to</span><Sel v="" set={(v) => v && mutate((st) => A.reassign(st, [it.id], v, me!.id))} ph="Choose…" options={cands.map((u) => ({ v: u.id, t: `${u.name} · ${u.team}` }))} /></div>}
               </Card>
             ))}</div></div>
@@ -283,7 +280,7 @@ function RecordsDesk() {
   if (cur) {
     const { r, it } = cur;
     return (
-      <div className="mx-auto max-w-5xl p-4 @2xl:p-8">
+      <div className="p-4 @2xl:p-8">
         <Back onClick={() => setId(null)} label="Back to the queue" />
         <header className="mb-5"><div className="flex items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{it.caseId}</span><StatusPill it={it} />{it.flags.includes("mergePending") && <Pill tone="amber">Merge pending</Pill>}</div>
           <h1 className="mt-2 text-[26px] font-semibold leading-tight tracking-tight">{it.title}</h1><p className="mt-1 text-sm text-muted">{r.placeName} · {r.id} · reported by {userOf(r.reporterId)?.name}</p></header>
@@ -330,7 +327,7 @@ function EmergencyDesk() {
     const notOurs = r.input.brand === "other" || !r.input.inArea;
     const pl = PLACES.find((p) => p.id === r.placeId);
     return (
-      <div className="mx-auto max-w-5xl p-4 @2xl:p-8">
+      <div className="p-4 @2xl:p-8">
         <Back onClick={() => setId(null)} label="Back to the inbox" />
         <header className="mb-5"><div className="flex items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{it.caseId}</span><Pill tone="red">Emergency</Pill><Pill tone={it.status === "new" && mins(it) > 10 ? "red" : "gray"}>{mins(it)} min since alert</Pill></div>
           <h1 className="mt-2 text-[26px] font-semibold leading-tight tracking-tight text-red-700">{it.title}</h1><p className="mt-1 text-sm text-muted">{r.placeName} · {r.id}</p></header>
@@ -374,7 +371,7 @@ function ServiceDesk() {
     return (
       <>
         <ItemPanel r={cur.r} it={cur.it} role="svc" onClose={() => setId(null)} />
-        {cur.it.kind === "emergency" && <div className="mx-auto -mt-2 max-w-5xl px-4 pb-8 @2xl:px-8"><div className="rounded-xl bg-red-50 p-3 text-sm text-red-900">Emergency on a lift we maintain. The emergency desk leads. Dispatch arrives as a service order{cur.it.serviceOrder ? `: ${cur.it.serviceOrder}` : ""}.</div></div>}
+        {cur.it.kind === "emergency" && <div className="-mt-2 px-4 pb-8 @2xl:px-8"><div className="rounded-xl bg-red-50 p-3 text-sm text-red-900">Emergency on a lift we maintain. The emergency desk leads. Dispatch arrives as a service order{cur.it.serviceOrder ? `: ${cur.it.serviceOrder}` : ""}.</div></div>}
       </>
     );
   }
@@ -443,14 +440,15 @@ function AdminRules() {
   const { s, me, mutate } = useApp();
   const c = s.cfg;
   const set = (label: string, fn: (c: typeof s.cfg) => void) => mutate((st) => { fn(st.cfg); st.audit.unshift({ t: nowOf(st), by: me!.name, text: label }); });
-  const num = (v: number, on: (n: number) => void) => <input type="number" defaultValue={v} onBlur={(e) => { const n = Number(e.target.value); if (!Number.isNaN(n) && n !== v) on(n); }} className="min-h-9 w-20 rounded-lg border border-line px-2 text-right text-sm" />;
+  const num = (v: number, on: (n: number) => void) => <Input type="number" defaultValue={v} onBlur={(e) => { const n = Number(e.target.value); if (!Number.isNaN(n) && n !== v) on(n); }} className="h-9 w-20 px-2 text-right" />;
   const BASE: [keyof typeof c.base, string][] = [["ourOther", "Our lift, another company services it"], ["site", "Building site with no lift yet"], ["ended", "Our lift, contract ended"], ["ourMissingProblem", "Our lift, not in records, with a problem"], ["keyCustomer", "Another site of a key customer"], ["ourProblem", "Our lift under contract with a problem"], ["otherLocal", "Another company's lift, local firm / staff / nobody"], ["veryOld", "Very old lift (modernisation)"], ["otherMaker", "Another company's lift, serviced by its own maker"]];
   return (
     <Page title="Rules and routing" sub="Pilot: configuration files. Every change is written to the audit log." right={
-      <button onClick={() => set(`Routing ${c.paused ? "resumed" : "paused"}`, (x) => { x.paused = !x.paused; })} className={`rounded-xl px-4 py-2.5 text-sm font-bold text-white ${c.paused ? "bg-emerald-600" : "bg-red-700"}`}>{c.paused ? "Resume routing" : "Pause routing now"}</button>}>
+      <Button onClick={() => set(`Routing ${c.paused ? "resumed" : "paused"}`, (x) => { x.paused = !x.paused; })} className={`h-10 px-4 text-sm font-semibold text-white ${c.paused ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-700 hover:bg-red-800"}`}>{c.paused ? "Resume routing" : "Pause routing now"}</Button>}>
       <AdminOverview />
       {c.paused && <div className="mb-4 rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-800">Routing is paused. New reports are accepted and sent to the manager exception list.</div>}
       <div className="grid gap-4 @4xl:grid-cols-2">
+        <Card className="p-4 @4xl:col-span-2"><Section title="Approvals"><label className="flex cursor-pointer items-start gap-3 text-sm"><Checkbox checked={c.approveAll} onCheckedChange={() => set(`Sales Manager approval ${c.approveAll ? "only above the seller guideline" : "for every quotation and bid"}`, (x) => { x.approveAll = !x.approveAll; })} className="mt-0.5" /><span><b>Every quotation needs the Sales Manager</b><span className="block text-muted">Off: only discounts above the seller guideline need approval.</span></span></label></Section></Card>
         <Card className="p-4"><Section title="Tier thresholds (score)">{([["hot", "Hot: act within one working day"], ["warm", "Warm: three working days"], ["cold", "Cold: reviewed weekly"]] as const).map(([k, l]) => <div key={k} className="flex items-center justify-between py-1 text-sm"><span>{l}</span>{num(c.tiers[k], (n) => set(`Tier threshold ${k} set to ${n}`, (x) => { x.tiers[k] = n; }))}</div>)}</Section>
           <Section title="Follow-up clock (hours)">{([["hot", "Hot"], ["warm", "Warm"]] as const).map(([k, l]) => <div key={k} className="py-1 text-sm"><div className="mb-1 font-medium">{l}: reminder, manager told, manager reassigns</div><div className="flex gap-2">{[0, 1, 2].map((i) => <span key={i}>{num(c.followUp[k][i], (n) => set(`Follow-up ${k}[${i}] set to ${n}h`, (x) => { x.followUp[k][i] = n; }))}</span>)}</div></div>)}
             <div className="flex items-center justify-between py-1 text-sm"><span>Daily limit of paid reports</span>{num(c.dailyLimit, (n) => set(`Daily limit set to ${n}`, (x) => { x.dailyLimit = n; }))}</div></Section></Card>

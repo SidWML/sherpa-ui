@@ -1,4 +1,5 @@
 "use client";
+import { Choice } from "@/components/form";
 import type { ReactNode } from "react";
 import { clockHours, effTier, useApp, userOf } from "@/lib/store";
 import { OPENING, facts } from "@/lib/engine";
@@ -11,10 +12,7 @@ import { Back, Fold, Label, NbaCard } from "./Action";
 
 export function Sel({ v, set, options, ph }: { v: string; set: (x: string) => void; options: string[] | { v: string; t: string }[]; ph?: string }) {
   return (
-    <select value={v} onChange={(e) => set(e.target.value)} className="min-h-9 rounded-lg border border-line bg-white px-2.5 text-[13px] outline-none focus:border-brand">
-      {ph && <option value="">{ph}</option>}
-      {(options as (string | { v: string; t: string })[]).map((o) => typeof o === "string" ? <option key={o}>{o}</option> : <option key={o.v} value={o.v}>{o.t}</option>)}
-    </select>
+    <Choice value={v} onChange={set} size="sm" placeholder={ph} className="w-auto" options={(options as (string | { v: string; t: string })[]).map((o) => typeof o === "string" ? o : { value: o.v, label: o.t })} />
   );
 }
 
@@ -48,7 +46,7 @@ export function ItemPanel({ r, it, role, onClose, showContact = true }: { r: Rep
   const others = r.items.filter((x) => x.id !== it.id && x.team && x.team !== "AM" && !x.silent && x.kind !== "info" && x.kind !== "note");
   const hidden = ["needsInfo", "mergePending", "newPlace", "lowCertainty", "possibleDuplicate", "dataFix", "review"];
   return (
-    <div className="mx-auto max-w-5xl p-4 @2xl:p-8">
+    <div className="p-4 @2xl:p-8">
       {onClose && <Back onClick={onClose} label="Back to the list" />}
       <header className="mb-5">
         <div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-xs font-bold text-muted">{it.caseId}</span>{it.kind === "emergency" ? <Pill tone="red">Emergency</Pill> : <TierPill tier={t} />}<StatusPill it={it} />{it.override && <Pill tone="amber">Tier overridden</Pill>}{it.silent && <Pill tone="blue">Heads-up</Pill>}{it.flags.filter((f) => !hidden.includes(f)).map((f) => <Pill key={f} tone="amber">{f}</Pill>)}</div>
@@ -111,7 +109,7 @@ export function Kpi({ k, v, sub, tone }: { k: string; v: ReactNode; sub?: string
 
 export function Page({ title, sub, children, right }: { title: string; sub?: string; children: ReactNode; right?: ReactNode }) {
   return (
-    <div className="mx-auto max-w-[1400px] p-4 @2xl:p-8">
+    <div className="p-4 @2xl:p-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-[26px] font-semibold leading-tight tracking-tight">{title}</h1>{sub && <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">{sub}</p>}</div>{right}</div>
       {children}
     </div>
